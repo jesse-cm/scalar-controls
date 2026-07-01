@@ -41,6 +41,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from ..attitude import (attitude_error_angle, propagate,
                         quat_from_small_angle, quat_mul, to_body)
@@ -79,6 +80,9 @@ class MEKF:
     sigma_u: float = 1.0e-5                    # gyro bias RW [rad/s/sqrt(s)]
     sigma_sun: float = 0.06                    # sun-vector meas noise [rad]
     sigma_mag: float = 0.03                    # mag-direction meas noise [rad]
+    # exact covariance transition expm(-[w]x dt) vs first-order I-[w]x dt; the
+    # exact form is negligibly costlier and prevents coarse-dt divergence.
+    exact_transition: bool = True
     q: np.ndarray = None                       # reference attitude q_{B<-I}
     b: np.ndarray = field(default_factory=lambda: np.zeros(3))   # bias estimate
     P: np.ndarray = None                       # 6x6 covariance
@@ -105,7 +109,10 @@ class MEKF:
         omega_hat = np.asarray(gyro_meas, float) - self.b
         self.q = propagate(self.q, omega_hat, dt)
         F = np.eye(6)
-        F[:3, :3] = np.eye(3) - skew(omega_hat) * dt   # ~ expm(-[omega]x dt)
+        if self.exact_transition:
+            F[:3, :3] = Rotation.from_rotvec(-omega_hat * dt).as_matrix()
+        else:
+            F[:3, :3] = np.eye(3) - skew(omega_hat) * dt   # first-order
         F[:3, 3:] = np.eye(3) * dt                     # dtheta/dbias coupling
         Q = discrete_process_noise(self.sigma_v, self.sigma_u, dt)
         self.P = F @ self.P @ F.T + Q

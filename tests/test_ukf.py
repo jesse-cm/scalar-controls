@@ -60,13 +60,15 @@ def test_usque_cold_start_converges():
     assert s["median_deg"] < 5.0
 
 
-def test_usque_robust_to_coarse_dt_where_mekf_diverges():
-    """Headline UKF win: at a coarse step the first-order MEKF update diverges
-    for large per-step rotations; the sigma-point filter does not."""
-    from scalar.estimator.mekf import run_mekf
+def test_coarse_dt_divergence_is_the_first_order_transition():
+    """At a coarse step with fast tumble the MEKF's *first-order* covariance
+    transition diverges — but the exact-F MEKF and the USQUE both stay bounded.
+    So the coarse-dt robustness is the exact transition, not the unscented
+    machinery per se (a key exploration finding)."""
+    from scalar.estimator.mekf import MEKF, run_mekf
     from scalar.montecarlo import randomized_scenario
 
-    mekf_diverged = 0
+    first_order_diverged = 0
     for s in range(8):
         sc = randomized_scenario(s, dt=3.0)
         rng = np.random.default_rng(2000 + s)
@@ -75,10 +77,11 @@ def test_usque_robust_to_coarse_dt_where_mekf_diverges():
         sc.omega0 = np.deg2rad(8.0) * ax          # fast tumble
         res = sc.run()
         w = len(res) // 5
-        if run_mekf(res).err_deg[w:].max() > 30.0:
-            mekf_diverged += 1
-        assert run_ukf(res).err_deg[w:].max() < 20.0   # UKF stays bounded
-    assert mekf_diverged >= 1                          # MEKF does blow up
+        if run_mekf(res, MEKF(exact_transition=False)).err_deg[w:].max() > 30.0:
+            first_order_diverged += 1
+        assert run_mekf(res, MEKF(exact_transition=True)).err_deg[w:].max() < 20.0
+        assert run_ukf(res).err_deg[w:].max() < 20.0
+    assert first_order_diverged >= 1              # first-order does blow up
 
 
 if __name__ == "__main__":
