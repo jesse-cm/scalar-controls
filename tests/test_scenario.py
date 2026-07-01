@@ -62,9 +62,14 @@ def test_measurements_track_truth():
     for k in range(0, len(res), 50):
         B_true_body = to_body(res.q_true[k], res.B_eci[k])
         assert np.linalg.norm(res.mag_body[k] - B_true_body) < 3e-6  # >>3e-7 noise
-    # gyro ~ omega + bias (within a few sigma of ARW at this dt)
+    # gyro residual should be pure ARW white noise: bounded per sample AND
+    # zero-mean (a zero-mean check catches a bias-bookkeeping off-by-one that a
+    # loose magnitude bound would miss).
+    from scalar.sensors.gyro import Gyro
+    sigma_w = Gyro().rate_noise_density / np.sqrt(res.dt)
     resid = res.gyro_meas - res.omega_true - res.gyro_bias_true
-    assert np.all(np.linalg.norm(resid, axis=1) < 5e-3)
+    assert np.all(np.linalg.norm(resid, axis=1) < 8 * sigma_w * np.sqrt(3))
+    assert np.linalg.norm(resid.mean(axis=0)) < 1e-5     # << would-be 1.4e-5 bias slip
 
 
 def test_sun_sensor_direction_reasonable_when_lit():
