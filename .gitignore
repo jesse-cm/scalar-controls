@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+# personal Claude Code config (not team-shared)
+.claude/settings.local.json
+# generated sim outputs
+outputs/
+*.png
+*.csv
+!scalar/**/*.csv
+.DS_Store
