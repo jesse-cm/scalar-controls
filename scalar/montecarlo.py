@@ -21,6 +21,7 @@ from .attitude import rand_quat
 from .constants import DEG
 from .estimator.algebraic import run_triad
 from .estimator.mekf import MEKF, run_mekf
+from .estimator.ukf import USQUE, run_ukf
 from .scenario import Scenario
 
 __all__ = ["VariantStats", "randomized_scenario", "default_runners",
@@ -110,6 +111,7 @@ def default_runners():
     """Name -> callable(SimResult) -> err_deg array, for the default comparison."""
     return {
         "MEKF": lambda res: run_mekf(res, MEKF(), init_triad=True).err_deg,
+        "USQUE (UKF)": lambda res: run_ukf(res, USQUE(), init_triad=True).err_deg,
         "MEKF cold-start": lambda res: run_mekf(res, MEKF(), init_triad=False).err_deg,
         "TRIAD-only": lambda res: run_triad(res)[1],
     }
