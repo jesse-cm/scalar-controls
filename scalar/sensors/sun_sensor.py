@@ -80,13 +80,22 @@ class SunSensorArray:
         cos = self.normals @ np.asarray(sun_dir_body, dtype=float)
         return self.full_scale_current(irradiance) * np.clip(cos, 0.0, None)
 
-    def measure(self, sun_dir_body, irradiance, lit, rng):
-        """Noisy per-face photocurrents [A] including dark floor.
+    def measure(self, sun_dir_body, irradiance, lit, rng,
+                albedo_dir_body=None, albedo_irradiance=0.0):
+        """Noisy per-face photocurrents [A] including dark floor and albedo.
 
-        Photocurrent is non-negative, so the result is clamped at 0.
+        If ``albedo_dir_body`` (body-frame nadir) and ``albedo_irradiance`` are
+        given, Earth-reflected light adds a cosine photocurrent from that
+        direction when lit — a *systematic* term that pulls the reconstructed
+        sun vector toward Earth (unlike zero-mean noise). Photocurrent is
+        non-negative, so the result is clamped at 0.
         """
         fs = self.full_scale_current(irradiance)
         ideal = self.currents(sun_dir_body, irradiance, lit)
+        if lit and albedo_dir_body is not None and albedo_irradiance > 0.0:
+            cos_a = self.normals @ np.asarray(albedo_dir_body, dtype=float)
+            ideal = ideal + (self.responsivity * self.area * albedo_irradiance
+                             * np.clip(cos_a, 0.0, None))
         noise = rng.normal(0.0, self.noise_frac * fs, size=ideal.shape)
         return np.clip(ideal + self.dark_frac * fs + noise, 0.0, None)
 
@@ -104,7 +113,9 @@ class SunSensorArray:
             return None, False
         return v / mag, True
 
-    def measure_sun_vector(self, sun_dir_body, irradiance, lit, rng):
+    def measure_sun_vector(self, sun_dir_body, irradiance, lit, rng,
+                           albedo_dir_body=None, albedo_irradiance=0.0):
         """Convenience: measure + reconstruct -> (s_hat_body or None, valid)."""
-        c = self.measure(sun_dir_body, irradiance, lit, rng)
+        c = self.measure(sun_dir_body, irradiance, lit, rng,
+                         albedo_dir_body, albedo_irradiance)
         return self.reconstruct(c, irradiance)

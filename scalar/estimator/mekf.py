@@ -188,13 +188,14 @@ def run_mekf(res, mekf=None, init_triad=True):
         if k > 0:
             mekf.propagate(res.gyro_meas[k], res.dt)
 
-        # one-time TRIAD seed at the first sunlit sample (needs both vectors)
+        # one-time TRIAD seed at the first sunlit sample (needs both vectors).
+        # The estimator only knows its *reference* field (dipole), not the truth.
         if init_triad and not started and res.sun_valid[k]:
             mekf.init_triad(res.sun_eci[k], res.sun_body[k],
-                            res.B_eci[k], res.mag_body[k])
+                            res.B_eci_ref[k], res.mag_body[k])
             started = True
 
-        mekf.update_mag(res.B_eci[k], res.mag_body[k])
+        mekf.update_mag(res.B_eci_ref[k], res.mag_body[k])
         if res.sun_valid[k]:
             mekf.update_sun(res.sun_eci[k], res.sun_body[k])
 

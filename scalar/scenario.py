@@ -25,7 +25,7 @@ import numpy as np
 from .attitude import IDENTITY_QUAT, to_body
 from .constants import DEG
 from .dynamics import RigidBody, simulate_free_tumble
-from .environment.magfield import magnetic_field_eci
+from .environment.magfield import magnetic_field_eci, truth_field_eci
 from .environment.orbit import CircularOrbit
 from .environment.sun import eclipse_factor, solar_irradiance, sun_direction_eci
 from .sensors.gyro import Gyro
@@ -52,7 +52,8 @@ class SimResult:
     sun_eci: np.ndarray      # (N, 3) unit
     irradiance: np.ndarray   # (N,)   [W/m^2]
     lit: np.ndarray          # (N,)   bool (True = sunlit)
-    B_eci: np.ndarray        # (N, 3) [T]
+    B_eci: np.ndarray        # (N, 3) [T]  TRUTH field (what the magnetometer sees)
+    B_eci_ref: np.ndarray    # (N, 3) [T]  estimator's dipole reference field
     # --- measurements ---
     gyro_meas: np.ndarray    # (N, 3) [rad/s]
     mag_body: np.ndarray     # (N, 3) [T]
@@ -84,6 +85,9 @@ class Scenario:
     magnetometer: Magnetometer = field(default_factory=Magnetometer)
     sun_sensor: SunSensorArray = field(default_factory=SunSensorArray)
     seed: int = 0
+    # --- systematic (unaveraged) error sources; 0 => truth == model ---
+    albedo_coeff: float = 0.0            # Earth-albedo fraction on the sun sensor
+    field_model_error_deg: float = 0.0   # IGRF-vs-dipole field direction error
 
     def run(self):
         """Generate the truth + sensor timeline as a :class:`SimResult`."""
@@ -103,6 +107,7 @@ class Scenario:
         irradiance = np.empty(n)
         lit = np.empty(n, dtype=bool)
         B_eci = np.empty((n, 3))
+        B_eci_ref = np.empty((n, 3))
         gyro_meas = np.empty((n, 3))
         mag_body = np.empty((n, 3))
         sun_body = np.full((n, 3), np.nan)
@@ -115,15 +120,25 @@ class Scenario:
             s_eci = sun_direction_eci(jd[k])
             E = solar_irradiance(jd[k])
             is_lit = eclipse_factor(r, s_eci) > 0.0
-            B = magnetic_field_eci(r, jd[k])
+            B_ref = magnetic_field_eci(r, jd[k])                      # estimator model
+            B_true = truth_field_eci(r, jd[k], self.field_model_error_deg)  # measured
 
-            r_eci[k], sun_eci[k], irradiance[k], lit[k], B_eci[k] = r, s_eci, E, is_lit, B
+            r_eci[k], sun_eci[k], irradiance[k], lit[k] = r, s_eci, E, is_lit
+            B_eci[k], B_eci_ref[k] = B_true, B_ref
+
+            # Earth-albedo geometry: reflected light comes from nadir, strongest
+            # where the sub-satellite point is sunlit (over the dayside).
+            r_hat = r / np.linalg.norm(r)
+            nadir_body = to_body(q, -r_hat)
+            dayside = max(0.0, float(np.dot(r_hat, s_eci)))
+            albedo_E = self.albedo_coeff * E * dayside
 
             gyro_bias_true[k] = self.gyro.bias
             gyro_meas[k] = self.gyro.measure(w, self.dt, rng)
-            mag_body[k] = self.magnetometer.measure(B, q, rng)
+            mag_body[k] = self.magnetometer.measure(B_true, q, rng)
             s_hat, valid = self.sun_sensor.measure_sun_vector(
-                to_body(q, s_eci), E, is_lit, rng)
+                to_body(q, s_eci), E, is_lit, rng,
+                albedo_dir_body=nadir_body, albedo_irradiance=albedo_E)
             sun_valid[k] = valid
             if valid:
                 sun_body[k] = s_hat
@@ -132,5 +147,5 @@ class Scenario:
             t=truth.t, jd=jd, dt=self.dt,
             q_true=truth.q, omega_true=truth.omega, gyro_bias_true=gyro_bias_true,
             r_eci=r_eci, sun_eci=sun_eci, irradiance=irradiance, lit=lit,
-            B_eci=B_eci, gyro_meas=gyro_meas, mag_body=mag_body,
-            sun_body=sun_body, sun_valid=sun_valid)
+            B_eci=B_eci, B_eci_ref=B_eci_ref, gyro_meas=gyro_meas,
+            mag_body=mag_body, sun_body=sun_body, sun_valid=sun_valid)
