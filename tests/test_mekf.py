@@ -92,6 +92,34 @@ def test_mekf_estimates_gyro_bias():
     assert np.rad2deg(b_errN) < 0.1   # within 0.1 deg/s
 
 
+def test_iterated_mekf_locks_on_from_cold_start():
+    """The iterated update (n_iter>1) converges from a 150-deg initial error
+    within a few steps, where the single-step MEKF stays far off."""
+    from scalar.attitude import quat_from_rotvec, quat_mul
+    from scalar.constants import DEG
+    res = Scenario(dt=1.0, seed=3).run()
+    axis = np.array([1.0, 0.2, -0.3])
+    axis /= np.linalg.norm(axis)
+    q_bad = quat_mul(quat_from_rotvec(np.deg2rad(150) * axis), res.q_true[0])
+    P0 = np.diag(np.concatenate([(90 * DEG) ** 2 * np.ones(3),
+                                 (0.5 * DEG) ** 2 * np.ones(3)]))
+
+    def err_at_step(n_iter, kmax):
+        est = MEKF(q=q_bad.copy(), P=P0.copy(), n_iter=n_iter)
+        err = 0.0
+        for k in range(kmax + 1):
+            if k > 0:
+                est.propagate(res.gyro_meas[k], res.dt)
+            est.update_mag(res.B_eci_ref[k], res.mag_body[k])
+            if res.sun_valid[k]:
+                est.update_sun(res.sun_eci[k], res.sun_body[k])
+            err = np.rad2deg(attitude_error_angle(est.q, res.q_true[k]))
+        return err
+
+    assert err_at_step(8, 5) < 3.0       # iterated locks on fast
+    assert err_at_step(1, 5) > 10.0      # single-step still far off
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

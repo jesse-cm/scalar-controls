@@ -49,32 +49,43 @@ covariance transition and fixed; see below.)
 
 ## Estimators & what the comparison shows
 
-Four estimators (`scalar/estimator/`, compared in `scripts/monte_carlo.py`):
-**MEKF** (classical multiplicative EKF, exact covariance transition),
-**USQUE** (unscented quaternion filter, GRP sigma points), **MEKF cold-start**
-(no TRIAD init), and **TRIAD-only** (gyro-free algebraic baseline). Findings:
+Five estimators (`scalar/estimator/`, compared in `scripts/monte_carlo.py`):
+**MEKF** (multiplicative EKF, exact covariance transition), **IMEKF** (same, with
+an iterated update — `MEKF(n_iter>1)`), **USQUE** (unscented, GRP sigma points),
+**MEKF cold-start** (no TRIAD init), and **TRIAD-only** (gyro-free baseline).
 
-1. **Gyro fusion is essential** — TRIAD-only drifts to ~100° through eclipse
-   (holds its last fix); every filtered estimator stays sub-degree. The one
-   large, unambiguous difference.
-2. **The exact covariance transition matters** — the first-order MEKF
-   (`I−[ω]dt`) diverges at coarse steps (dt 2–4 s, ~60% of seeds); the exact
-   `expm(−[ω]dt)` (now default) fixes it at negligible cost.
-3. **The unscented transform helps only in the strongly nonlinear regime.**
-   With good init (TRIAD) and an update every step the problem stays near-linear,
-   so MEKF ≈ USQUE across baseline, systematics, high tumble, and coarse dt. But
-   from a large initial error (120° off, cold) the USQUE converges to <1° within
-   ~6 steps while the MEKF is still ~7° after 40 — a real UKF advantage for cold
-   acquisition. Shrinking the UKF sigma spread (α→0) reproduces the MEKF exactly
-   (a consistency check that both are correct). USQUE costs ~5× the MEKF, so it
-   earns its keep only if large-error reacquisition is expected.
-4. **No filter beats the systematic floor** — under albedo+IGRF error, accuracy
-   is set by the systematic magnitude (~5–9°), not the estimator. Iterated-EKF,
-   adaptive-R, and GRP-tuning all tie the MEKF (adaptive-R slightly worse, since
-   inflating R can't remove a bias).
+The differences are **entirely regime-dependent**: a warm-started, near-linear
+run makes every filter look identical, and only the strongly nonlinear regime
+separates them. (This bit me twice during the exploration — dismissing variants
+on warm-started tests before checking the cold regime.) By regime:
 
-Bottom line: **the classical MEKF with an exact transition is the right choice**
-for this problem; the fancier variants add cost without benefit.
+- **Nominal** (TRIAD init, update every step): MEKF = IMEKF = USQUE, all
+  sub-degree. Measurement-dominated and near-linear, so filter choice is moot.
+- **Coarse dt / high tumble**: the first-order transition `I−[ω]dt` diverges
+  (dt 2–4 s, ~60% of seeds); the exact `expm(−[ω]dt)` (now default) and USQUE do
+  not. This was an implementation gap, not an EKF-vs-UKF gap.
+- **Systematic error (albedo/IGRF)**: accuracy is floored by the systematic
+  magnitude (~5–9°), identical for every filter. Adaptive-R and GRP-tuning don't
+  help (inflating R can't remove a bias; adaptive-R is slightly worse).
+- **Cold acquisition (large initial error)**: filters diverge hard. From a 150°
+  cold start (6 seeds):
+
+  | filter | err @ step 5 | converge (<2°) |
+  |---|---|---|
+  | **IMEKF** | **0.9°** | **3 steps** |
+  | USQUE | 22.8° | 8 steps |
+  | MEKF | 33.8° | never (in-window) |
+
+  The **iterated update is the standout** — relinearizing drives it to the
+  two-vector (QUEST-like) solution each step, so it locks on in ~3 steps from any
+  prior, at negligible cost and no sigma points. USQUE also converges (sigma
+  points span the wide uncertainty); shrinking its spread α→0 reproduces the MEKF
+  exactly, a consistency check that both are correct.
+
+**Bottom line:** gyro fusion is essential (vs TRIAD-only); the exact transition
+is a free must-have; for steady-state ops the plain MEKF suffices; if the bus can
+start from an unknown tumbling attitude, **the iterated MEKF is the best and
+cheapest choice** (USQUE second). No estimator beats the systematic-error floor.
 
 ## Quick start
 

@@ -111,6 +111,7 @@ def default_runners():
     """Name -> callable(SimResult) -> err_deg array, for the default comparison."""
     return {
         "MEKF": lambda res: run_mekf(res, MEKF(), init_triad=True).err_deg,
+        "IMEKF": lambda res: run_mekf(res, MEKF(n_iter=8), init_triad=True).err_deg,
         "USQUE (UKF)": lambda res: run_ukf(res, USQUE(), init_triad=True).err_deg,
         "MEKF cold-start": lambda res: run_mekf(res, MEKF(), init_triad=False).err_deg,
         "TRIAD-only": lambda res: run_triad(res)[1],

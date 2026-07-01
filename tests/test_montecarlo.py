@@ -21,7 +21,8 @@ def test_randomized_scenarios_differ():
 
 def test_monte_carlo_structure():
     stats = run_monte_carlo(n_runs=3, dt=3.0, duration=1800.0)
-    assert set(stats) == {"MEKF", "USQUE (UKF)", "MEKF cold-start", "TRIAD-only"}
+    assert set(stats) == {"MEKF", "IMEKF", "USQUE (UKF)", "MEKF cold-start",
+                          "TRIAD-only"}
     for s in stats.values():
         assert s.run_median.shape == (3,)
         assert np.all(np.isfinite(s.run_median))
