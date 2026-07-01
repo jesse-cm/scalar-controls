@@ -42,10 +42,36 @@ with flown CubeSats using the same suite (e.g. UVSQ-SAT: <3° sunlit, ~10°
 eclipse). Under worst-case systematics the p95 (~21°) exceeds the 15° budget —
 which is exactly the headroom the 10–15° target reserves.
 
-Two caveats from the audit: the sub-degree *eclipse* number depends on the bus
+One caveat from the audit: the sub-degree *eclipse* number depends on the bus
 tumbling fast enough (≳2°/s) for the magnetometer to be observable about all
-axes; and the propagation is stable at the shipped step sizes (dt ≤ 1 s) but the
-first-order update diverges for dt ≥ 2 s at high tumble rates.
+axes. (A second — coarse-dt divergence — was traced to the first-order
+covariance transition and fixed; see below.)
+
+## Estimators & what the comparison shows
+
+Four estimators (`scalar/estimator/`, compared in `scripts/monte_carlo.py`):
+**MEKF** (classical multiplicative EKF, exact covariance transition),
+**USQUE** (unscented quaternion filter, GRP sigma points), **MEKF cold-start**
+(no TRIAD init), and **TRIAD-only** (gyro-free algebraic baseline). Findings:
+
+1. **Gyro fusion is essential** — TRIAD-only drifts to ~100° through eclipse
+   (holds its last fix); every filtered estimator stays sub-degree. The one
+   large, unambiguous difference.
+2. **The exact covariance transition matters** — the first-order MEKF
+   (`I−[ω]dt`) diverges at coarse steps (dt 2–4 s, ~60% of seeds); the exact
+   `expm(−[ω]dt)` (now default) fixes it at negligible cost.
+3. **The unscented transform buys ~nothing here** — with exact-F, MEKF and USQUE
+   are statistically identical across baseline, systematics, high tumble, and
+   coarse dt. The 2-vector unit-measurement problem is too mildly nonlinear for
+   sigma-points to pay off at ~5× the cost; USQUE is kept as an independent
+   cross-check.
+4. **No filter beats the systematic floor** — under albedo+IGRF error, accuracy
+   is set by the systematic magnitude (~5–9°), not the estimator. Iterated-EKF,
+   adaptive-R, and GRP-tuning all tie the MEKF (adaptive-R slightly worse, since
+   inflating R can't remove a bias).
+
+Bottom line: **the classical MEKF with an exact transition is the right choice**
+for this problem; the fancier variants add cost without benefit.
 
 ## Quick start
 
