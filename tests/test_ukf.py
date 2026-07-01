@@ -1,0 +1,77 @@
+"""Tests for the USQUE unscented attitude filter."""
+from __future__ import annotations
+
+import os
+import sys
+
+import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from scalar.attitude import attitude_error_angle, quat_from_rotvec  # noqa: E402
+from scalar.estimator.ukf import USQUE, dq_from_grp, grp_from_dq, run_ukf  # noqa: E402
+from scalar.scenario import Scenario  # noqa: E402
+
+
+def test_grp_roundtrip():
+    rng = np.random.default_rng(0)
+    for a, f in [(1.0, 4.0), (0.0, 1.0), (1.0, 2.0)]:
+        for _ in range(50):
+            rv = rng.standard_normal(3)
+            rv = rv / np.linalg.norm(rv) * rng.uniform(0.0, 2.0)  # up to ~115 deg
+            dq = quat_from_rotvec(rv)
+            dq2 = dq_from_grp(grp_from_dq(dq, a, f), a, f)
+            assert attitude_error_angle(dq2, dq) < 1e-9
+
+
+def test_usque_converges_within_budget():
+    res = Scenario(dt=1.0, seed=3).run()
+    s = run_ukf(res).summary()
+    assert s["median_deg"] < 3.0
+    assert s["p95_deg"] < 10.0
+    assert s["lit_median_deg"] < 3.0
+    assert s["eclipse_median_deg"] < 10.0
+
+
+def test_usque_matches_mekf_baseline():
+    """Under truth==model both filters should be sub-degree and close."""
+    from scalar.estimator.mekf import run_mekf
+    res = Scenario(dt=1.0, seed=11).run()
+    m = run_mekf(res).summary()["median_deg"]
+    u = run_ukf(res).summary()["median_deg"]
+    assert abs(m - u) < 1.0
+    assert u < 2.0
+
+
+def test_usque_estimates_bias():
+    res = Scenario(dt=1.0, seed=7).run()
+    out = run_ukf(res)
+    b0 = np.linalg.norm(out.b_est[0] - res.gyro_bias_true[0])
+    bN = np.linalg.norm(out.b_est[-1] - res.gyro_bias_true[-1])
+    assert bN < b0
+    assert np.rad2deg(bN) < 0.15
+
+
+def test_usque_cold_start_converges():
+    """No TRIAD seed (identity + large P) should still converge — the unscented
+    transform handles the large initial error."""
+    res = Scenario(dt=1.0, seed=5).run()
+    s = run_ukf(res, USQUE(), init_triad=False).summary()
+    assert s["median_deg"] < 5.0
+
+
+if __name__ == "__main__":
+    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    failed = 0
+    for t in tests:
+        try:
+            t()
+            print(f"PASS  {t.__name__}")
+        except AssertionError as e:
+            failed += 1
+            print(f"FAIL  {t.__name__}: {e}")
+        except Exception as e:  # noqa: BLE001
+            failed += 1
+            print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
+    print(f"\n{len(tests) - failed}/{len(tests)} passed")
+    sys.exit(1 if failed else 0)
