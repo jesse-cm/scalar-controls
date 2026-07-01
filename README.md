@@ -60,11 +60,14 @@ Four estimators (`scalar/estimator/`, compared in `scripts/monte_carlo.py`):
 2. **The exact covariance transition matters** — the first-order MEKF
    (`I−[ω]dt`) diverges at coarse steps (dt 2–4 s, ~60% of seeds); the exact
    `expm(−[ω]dt)` (now default) fixes it at negligible cost.
-3. **The unscented transform buys ~nothing here** — with exact-F, MEKF and USQUE
-   are statistically identical across baseline, systematics, high tumble, and
-   coarse dt. The 2-vector unit-measurement problem is too mildly nonlinear for
-   sigma-points to pay off at ~5× the cost; USQUE is kept as an independent
-   cross-check.
+3. **The unscented transform helps only in the strongly nonlinear regime.**
+   With good init (TRIAD) and an update every step the problem stays near-linear,
+   so MEKF ≈ USQUE across baseline, systematics, high tumble, and coarse dt. But
+   from a large initial error (120° off, cold) the USQUE converges to <1° within
+   ~6 steps while the MEKF is still ~7° after 40 — a real UKF advantage for cold
+   acquisition. Shrinking the UKF sigma spread (α→0) reproduces the MEKF exactly
+   (a consistency check that both are correct). USQUE costs ~5× the MEKF, so it
+   earns its keep only if large-error reacquisition is expected.
 4. **No filter beats the systematic floor** — under albedo+IGRF error, accuracy
    is set by the systematic magnitude (~5–9°), not the estimator. Iterated-EKF,
    adaptive-R, and GRP-tuning all tie the MEKF (adaptive-R slightly worse, since

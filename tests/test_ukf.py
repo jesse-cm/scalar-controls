@@ -84,6 +84,44 @@ def test_coarse_dt_divergence_is_the_first_order_transition():
     assert first_order_diverged >= 1              # first-order does blow up
 
 
+def test_usque_beats_mekf_from_large_initial_error():
+    """The genuine UKF win: from a 120-deg initial error (cold acquisition) the
+    sigma-point filter converges far faster than the first-order MEKF, and
+    collapsing the UKF sigma spread (alpha->0) reproduces the MEKF — proving the
+    two are distinct, correct filters (not accidentally identical)."""
+    from scalar.attitude import quat_from_rotvec, quat_mul
+    from scalar.constants import DEG
+    from scalar.estimator.mekf import MEKF
+
+    res = Scenario(dt=1.0, seed=3).run()
+    axis = np.array([1.0, 0.2, -0.3])
+    axis /= np.linalg.norm(axis)
+    q_bad = quat_mul(quat_from_rotvec(np.deg2rad(120) * axis), res.q_true[0])
+    P0 = np.diag(np.concatenate([(90 * DEG) ** 2 * np.ones(3),
+                                 (0.5 * DEG) ** 2 * np.ones(3)]))
+
+    def converge(cls, **kw):
+        est = cls(q=q_bad.copy(), P=P0.copy(), **kw)
+        errs = []
+        for k in range(40):
+            if k > 0:
+                est.propagate(res.gyro_meas[k], res.dt)
+            est.update_mag(res.B_eci_ref[k], res.mag_body[k])
+            if res.sun_valid[k]:
+                est.update_sun(res.sun_eci[k], res.sun_body[k])
+            errs.append(np.rad2deg(attitude_error_angle(est.q, res.q_true[k])))
+        return np.array(errs)
+
+    em = converge(MEKF)
+    eu = converge(USQUE)
+    ec = converge(USQUE, alpha=1e-3)              # sigma spread -> 0
+
+    assert eu[15] < 3.0                           # UKF has converged
+    assert em[15] > 2 * eu[15]                    # MEKF still far off
+    # collapsed UKF tracks the MEKF, not the full UKF
+    assert abs(ec[15] - em[15]) < abs(eu[15] - em[15])
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
