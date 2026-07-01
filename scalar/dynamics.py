@@ -21,7 +21,8 @@ import numpy as np
 
 from .attitude import propagate, to_eci
 
-__all__ = ["RigidBody", "default_inertia", "simulate_free_tumble", "TruthTimeline"]
+__all__ = ["RigidBody", "default_inertia", "simulate_free_tumble",
+           "simulate_controlled", "TruthTimeline"]
 
 
 def default_inertia(mass=1.3, side=0.1, asymmetry=(0.9, 1.0, 1.15)):
@@ -48,10 +49,15 @@ class RigidBody:
         self.inertia = np.asarray(self.inertia, dtype=float)
         self.inv_inertia = np.linalg.inv(self.inertia)
 
-    def omega_dot(self, omega):
-        """Angular acceleration [rad/s^2] from Euler's equation (tau = 0)."""
-        H = self.inertia @ omega
-        return self.inv_inertia @ (-np.cross(omega, H))
+    def omega_dot(self, omega, torque=None):
+        """Angular acceleration [rad/s^2]: I^-1 (tau - omega x (I omega)).
+
+        ``torque`` is the external body torque [N·m] (None -> torque-free).
+        """
+        rhs = -np.cross(omega, self.inertia @ omega)
+        if torque is not None:
+            rhs = rhs + np.asarray(torque, dtype=float)
+        return self.inv_inertia @ rhs
 
     def kinetic_energy(self, omega):
         """Rotational kinetic energy [J] = 1/2 omega^T I omega (conserved)."""
@@ -96,3 +102,33 @@ def simulate_free_tumble(body, q0, omega0, dt, n_steps):
         qs[i + 1], ws[i + 1] = q, w
     t = np.arange(n_steps + 1) * dt
     return TruthTimeline(t=t, q=qs, omega=ws)
+
+
+def simulate_controlled(body, q0, omega0, dt, n_steps, torque_fn):
+    """Integrate closed-loop dynamics under a control torque.
+
+    ``torque_fn(t, q, omega)`` returns the body torque [N·m] applied over the
+    step (zero-order hold, the discrete-control convention). Returns
+    (:class:`TruthTimeline`, torques) where ``torques`` is (n_steps+1, 3) with
+    the last row repeated for shape alignment.
+    """
+    q = np.asarray(q0, dtype=float)
+    w = np.asarray(omega0, dtype=float)
+    qs = np.empty((n_steps + 1, 4))
+    ws = np.empty((n_steps + 1, 3))
+    taus = np.zeros((n_steps + 1, 3))
+    qs[0], ws[0] = q, w
+    for i in range(n_steps):
+        tau = np.asarray(torque_fn(i * dt, q, w), dtype=float)
+        taus[i] = tau
+        k1 = body.omega_dot(w, tau)
+        k2 = body.omega_dot(w + 0.5 * dt * k1, tau)
+        k3 = body.omega_dot(w + 0.5 * dt * k2, tau)
+        k4 = body.omega_dot(w + dt * k3, tau)
+        w_next = w + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
+        q = propagate(q, 0.5 * (w + w_next), dt)
+        w = w_next
+        qs[i + 1], ws[i + 1] = q, w
+    taus[n_steps] = taus[n_steps - 1] if n_steps > 0 else 0.0
+    t = np.arange(n_steps + 1) * dt
+    return TruthTimeline(t=t, q=qs, omega=ws), taus
