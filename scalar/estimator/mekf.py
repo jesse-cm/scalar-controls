@@ -41,6 +41,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from ..attitude import (attitude_error_angle, propagate, quat_conj,
                         quat_from_small_angle, quat_mul, to_body)
@@ -79,6 +80,12 @@ class MEKF:
     sigma_u: float = 1.0e-5                    # gyro bias RW [rad/s/sqrt(s)]
     sigma_sun: float = 0.06                    # sun-vector meas noise [rad]
     sigma_mag: float = 0.03                    # mag-direction meas noise [rad]
+    # exact covariance transition expm(-[w]x dt) vs first-order I-[w]x dt; the
+    # exact form is negligibly costlier and prevents coarse-dt divergence.
+    exact_transition: bool = True
+    # measurement-update iterations: 1 = standard EKF; >1 = iterated EKF, which
+    # relinearizes and locks on from large initial errors (cold acquisition).
+    n_iter: int = 1
     q: np.ndarray = None                       # reference attitude q_{B<-I}
     b: np.ndarray = field(default_factory=lambda: np.zeros(3))   # bias estimate
     P: np.ndarray = None                       # 6x6 covariance
@@ -105,30 +112,41 @@ class MEKF:
         omega_hat = np.asarray(gyro_meas, float) - self.b
         self.q = propagate(self.q, omega_hat, dt)
         F = np.eye(6)
-        F[:3, :3] = np.eye(3) - skew(omega_hat) * dt   # ~ expm(-[omega]x dt)
+        if self.exact_transition:
+            F[:3, :3] = Rotation.from_rotvec(-omega_hat * dt).as_matrix()
+        else:
+            F[:3, :3] = np.eye(3) - skew(omega_hat) * dt   # first-order
         F[:3, 3:] = np.eye(3) * dt                     # dtheta/dbias coupling
         Q = discrete_process_noise(self.sigma_v, self.sigma_u, dt)
         self.P = F @ self.P @ F.T + Q
 
     # --- measurement update -------------------------------------------------
     def update_vector(self, r_eci, b_meas, sigma):
-        """Fuse one unit-vector measurement (body ``b_meas`` of ECI ``r_eci``)."""
+        """Fuse one unit-vector measurement (body ``b_meas`` of ECI ``r_eci``).
+
+        With ``n_iter == 1`` this is the standard EKF update; with ``n_iter > 1``
+        it is the iterated EKF (Gauss-Newton): each pass relinearizes about the
+        updated estimate, so it converges from large initial errors the
+        single-step linearization cannot. Iterating is only consequential when
+        the error is large, so it is effectively free in the nominal regime.
+        """
         r_hat = np.asarray(r_eci, float) / np.linalg.norm(r_eci)
-        b_pred = to_body(self.q, r_hat)
         b_meas = np.asarray(b_meas, float)
         b_meas = b_meas / np.linalg.norm(b_meas)
-
-        H = np.zeros((3, 6))
-        H[:, :3] = -skew(b_pred)
         R = (sigma ** 2) * np.eye(3)
-        y = b_meas - b_pred
-        S = H @ self.P @ H.T + R
-        K = self.P @ H.T @ np.linalg.inv(S)
-        dx = K @ y
 
-        dtheta, db = dx[:3], dx[3:]
-        self.q = quat_mul(quat_from_small_angle(dtheta), self.q)
-        self.b = self.b + db
+        dx = np.zeros(6)
+        for _ in range(self.n_iter):
+            q_op = quat_mul(quat_from_small_angle(dx[:3]), self.q)
+            b_pred = to_body(q_op, r_hat)
+            H = np.zeros((3, 6))
+            H[:, :3] = -skew(b_pred)
+            S = H @ self.P @ H.T + R
+            K = self.P @ H.T @ np.linalg.inv(S)
+            dx = K @ ((b_meas - b_pred) + H @ dx)     # IEKF innovation
+
+        self.q = quat_mul(quat_from_small_angle(dx[:3]), self.q)
+        self.b = self.b + dx[3:]
         IKH = np.eye(6) - K @ H
         self.P = IKH @ self.P @ IKH.T + K @ R @ K.T   # Joseph form
 

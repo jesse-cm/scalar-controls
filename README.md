@@ -45,10 +45,50 @@ synthetic dipole field error; with the **real IGRF** field as the onboard
 reference and sensor **calibration** applied, the residual sensor error falls to
 ~1–3° (see [Sensor calibration](#sensor-calibration) below).
 
-Two caveats from the audit: the sub-degree *eclipse* number depends on the bus
+One caveat from the audit: the sub-degree *eclipse* number depends on the bus
 tumbling fast enough (≳2°/s) for the magnetometer to be observable about all
-axes; and the propagation is stable at the shipped step sizes (dt ≤ 1 s) but the
-first-order update diverges for dt ≥ 2 s at high tumble rates.
+axes. (A second — coarse-dt divergence — was traced to the first-order
+covariance transition and fixed; see below.)
+
+## Estimators & what the comparison shows
+
+Five estimators (`scalar/estimator/`, compared in `scripts/monte_carlo.py`):
+**MEKF** (multiplicative EKF, exact covariance transition), **IMEKF** (same, with
+an iterated update — `MEKF(n_iter>1)`), **USQUE** (unscented, GRP sigma points),
+**MEKF cold-start** (no TRIAD init), and **TRIAD-only** (gyro-free baseline).
+
+The differences are **entirely regime-dependent**: a warm-started, near-linear
+run makes every filter look identical, and only the strongly nonlinear regime
+separates them. (This bit me twice during the exploration — dismissing variants
+on warm-started tests before checking the cold regime.) By regime:
+
+- **Nominal** (TRIAD init, update every step): MEKF = IMEKF = USQUE, all
+  sub-degree. Measurement-dominated and near-linear, so filter choice is moot.
+- **Coarse dt / high tumble**: the first-order transition `I−[ω]dt` diverges
+  (dt 2–4 s, ~60% of seeds); the exact `expm(−[ω]dt)` (now default) and USQUE do
+  not. This was an implementation gap, not an EKF-vs-UKF gap.
+- **Systematic error (albedo/IGRF)**: accuracy is floored by the systematic
+  magnitude (~5–9°), identical for every filter. Adaptive-R and GRP-tuning don't
+  help (inflating R can't remove a bias; adaptive-R is slightly worse).
+- **Cold acquisition (large initial error)**: filters diverge hard. From a 150°
+  cold start (6 seeds):
+
+  | filter | err @ step 5 | converge (<2°) |
+  |---|---|---|
+  | **IMEKF** | **0.9°** | **3 steps** |
+  | USQUE | 22.8° | 8 steps |
+  | MEKF | 33.8° | never (in-window) |
+
+  The **iterated update is the standout** — relinearizing drives it to the
+  two-vector (QUEST-like) solution each step, so it locks on in ~3 steps from any
+  prior, at negligible cost and no sigma points. USQUE also converges (sigma
+  points span the wide uncertainty); shrinking its spread α→0 reproduces the MEKF
+  exactly, a consistency check that both are correct.
+
+**Bottom line:** gyro fusion is essential (vs TRIAD-only); the exact transition
+is a free must-have; for steady-state ops the plain MEKF suffices; if the bus can
+start from an unknown tumbling attitude, **the iterated MEKF is the best and
+cheapest choice** (USQUE second). No estimator beats the systematic-error floor.
 
 ## Sensor calibration
 
