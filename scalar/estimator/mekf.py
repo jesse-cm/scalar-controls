@@ -42,7 +42,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..attitude import (attitude_error_angle, propagate,
+from ..attitude import (attitude_error_angle, propagate, quat_conj,
                         quat_from_small_angle, quat_mul, to_body)
 from ..constants import DEG
 from .triad import triad
@@ -137,6 +137,40 @@ class MEKF:
 
     def update_sun(self, sun_eci, sun_body):
         self.update_vector(sun_eci, sun_body, self.sigma_sun)
+
+    def update_attitude(self, q_meas, sigma):
+        """Fuse a full absolute-attitude measurement (a star tracker).
+
+        The measurement is a quaternion ``q_meas ~ q_{B<-I}``; the innovation is
+        the small-angle rotation carrying the predicted attitude to the
+        measured one, ``dtheta = 2 * vec(q_meas * q_pred^{-1})``, observed
+        directly through the error state (``H = [I  0]``).
+
+        ``sigma`` is the 1-sigma per-axis attitude error [rad] (scalar, or a
+        3-vector for an anisotropic tracker).
+        """
+        q_meas = np.asarray(q_meas, float)
+        # error quaternion measured-from-predicted, in the body/error frame
+        dq = quat_mul(q_meas, quat_conj(self.q))
+        dq = dq * np.sign(dq[3] if dq[3] != 0 else 1.0)   # shortest rotation
+        y = 2.0 * dq[:3]                                   # small-angle vector
+
+        H = np.zeros((3, 6))
+        H[:, :3] = np.eye(3)
+        sig = np.atleast_1d(np.asarray(sigma, float))
+        if sig.size == 1:
+            R = (sig[0] ** 2) * np.eye(3)
+        else:
+            R = np.diag(sig ** 2)
+        S = H @ self.P @ H.T + R
+        K = self.P @ H.T @ np.linalg.inv(S)
+        dx = K @ y
+
+        dtheta, db = dx[:3], dx[3:]
+        self.q = quat_mul(quat_from_small_angle(dtheta), self.q)
+        self.b = self.b + db
+        IKH = np.eye(6) - K @ H
+        self.P = IKH @ self.P @ IKH.T + K @ R @ K.T   # Joseph form
 
 
 @dataclass

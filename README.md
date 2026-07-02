@@ -40,21 +40,60 @@ filtered. Adding them (`scripts/realism_sweep.py`, 40-run sweep):
 So the **defensible expectation is ~5–9° median knowledge error**, consistent
 with flown CubeSats using the same suite (e.g. UVSQ-SAT: <3° sunlit, ~10°
 eclipse). Under worst-case systematics the p95 (~21°) exceeds the 15° budget —
-which is exactly the headroom the 10–15° target reserves.
+which is exactly the headroom the 10–15° target reserves. This sweep uses the
+synthetic dipole field error; with the **real IGRF** field as the onboard
+reference and sensor **calibration** applied, the residual sensor error falls to
+~1–3° (see [Sensor calibration](#sensor-calibration) below).
 
 Two caveats from the audit: the sub-degree *eclipse* number depends on the bus
 tumbling fast enough (≳2°/s) for the magnetometer to be observable about all
 axes; and the propagation is stable at the shipped step sizes (dt ≤ 1 s) but the
 first-order update diverges for dt ≥ 2 s at high tumble rates.
 
+## Sensor calibration
+
+The field is now the **real IGRF** (via `ppigrf`), not a dipole stand-in, so
+the estimator can carry IGRF as its onboard reference and the residual attitude
+error is driven by *sensor* imperfections — magnetometer soft/hard iron and
+sun-sensor gain/roll-off — rather than a field-model mismatch. Three calibration
+techniques are implemented (`scalar/calibration/`) and compared for their effect
+on downstream MEKF knowledge error (`scripts/calibration_compare.py`, 12-orbit
+Monte-Carlo with representative distortions):
+
+| Calibration regime | Recovers | Median error | vs raw |
+|---|---|---|---|
+| none (raw) | — | 8.7° | 1.0× |
+| on-ground sun | per-diode gains (0.4%) | 7.9° | 1.1× |
+| on-orbit mag (ellipsoid) | hard-iron + symmetric soft-iron, up to rotation (295 nT scalar) | 2.9° | 3.0× |
+| on-ground + on-orbit | both of the above | 1.7° | 5.2× |
+| star-tracker-referenced | **full** soft-iron matrix + bias incl. rotation (D to 7e-4, bias to 8 nT) | **1.1°** | **7.7×** |
+
+Key findings:
+
+- The **magnetometer distortion dominates** — sun-sensor calibration alone barely
+  moves the error, because the magnetometer drives the MEKF at every step while
+  the sun sensor only helps when sunlit.
+- The **on-orbit ellipsoid fit** is attitude-*independent*: it exploits the known
+  IGRF field magnitude as a scalar reference and recovers the distortion without
+  ever knowing attitude. It removes hard-iron and the symmetric part of soft-iron
+  but leaves an unobservable rotation (a scalar reference cannot fix direction).
+- The **star-tracker-referenced fit** closes that gap. When the tracker has a fix
+  (~83% of the orbit here), attitude is known, so a linear regression of the raw
+  field against the IGRF body-frame field recovers the *full* soft-iron matrix
+  including its rotation — the most accurate regime.
+- The on-orbit ellipsoid fit requires the field magnitude to **vary along the
+  orbit** (18–46 µT over one LEO pass); a constant-field Helmholtz-cage sweep is
+  rank-degenerate and cannot solve the 9-parameter fit.
+
 ## Quick start
 
 ```bash
-pip install -r requirements.txt          # numpy, scipy, matplotlib
+pip install -r requirements.txt          # numpy, scipy, matplotlib, ppigrf
 python3 scripts/run_mekf.py              # one orbit + error plot -> outputs/
 python3 scripts/monte_carlo.py 40        # estimator comparison -> outputs/
 python3 scripts/realism_sweep.py 40      # expected accuracy vs systematic error
-for f in tests/test_*.py; do python3 "$f"; done   # 62 tests
+python3 scripts/calibration_compare.py 12  # calibration-technique comparison -> outputs/
+for f in tests/test_*.py; do python3 "$f"; done   # 110 tests
 ```
 
 ## Layout
@@ -68,19 +107,25 @@ scalar/
   scenario.py         assembles truth + environment + sensors into one SimResult
   environment/
     sun.py            ECI sun vector, irradiance, cylindrical eclipse
-    orbit.py          550 km / 51.6° circular LEO
-    magfield.py       tilted rotating dipole (IGRF stand-in)
+    orbit.py          550 km / 51.6° circular LEO with J2 secular precession
+    magfield.py       tilted rotating dipole (estimator reference model)
+    igrf.py           real IGRF-13/14 field (ppigrf), vectorised ECI batch
   sensors/
     gyro.py           LSM6DSO: ARW noise + random-walk bias
-    magnetometer.py   LIS2MDL: body-frame field + noise
-    sun_sensor.py     6-face cosine photodiodes + sun-vector reconstruction
+    magnetometer.py   LIS2MDL: body-frame field + noise + soft/hard iron
+    sun_sensor.py     6-face photodiodes + per-diode gain, FOV roll-off, misalignment
+    star_tracker.py   camera: absolute quaternion, anisotropic noise, keep-out gating
   estimator/
     triad.py          deterministic two-vector attitude (init)
-    mekf.py           the MEKF (state [dtheta, gyro-bias], vector updates)
+    mekf.py           the MEKF (state [dtheta, gyro-bias], vector + attitude updates)
     algebraic.py      TRIAD-only baseline
+  calibration/
+    mag_onorbit.py    attitude-independent ellipsoid fit (|B_IGRF| scalar reference)
+    sun_onground.py   pre-flight sun-sensor response-curve calibration
+    startracker_ref.py  star-tracker-referenced full soft-iron + bias recovery
   montecarlo.py       randomized multi-run comparison harness
-scripts/              runnable demos
-tests/                56 physics-validated tests
+scripts/              runnable demos (incl. calibration_compare.py)
+tests/                110 physics-validated tests
 ```
 
 ## Conventions
@@ -100,14 +145,22 @@ clean validation baseline:
 
 - **Earth albedo** on the sun sensor (`albedo_coeff`) — reflected light from
   nadir biases the reconstructed sun vector; the dominant sunlit error in orbit.
-- **IGRF-vs-dipole field error** (`field_model_error_deg`) — the field is a
-  tilted centered dipole; the ~5–10° non-dipole direction error is injected as a
-  systematic between truth and the estimator's reference. A full IGRF is
-  drop-in replaceable.
+- **Field-model error** — selectable truth field: the tilted centered dipole with
+  an optional synthetic direction offset (`field_model_error_deg`), or the **real
+  IGRF** (`field_truth="igrf"`). With IGRF truth, the dipole-vs-real discrepancy
+  is physical (~10° median direction error); pointing the estimator's reference
+  at the same IGRF removes it and exposes the sensor-calibration floor.
 
-Still simplified / omitted: sun-sensor cover-glass FOV roll-off and diode
-misalignment; sun ephemeris uses the ~0.01° analytic series taken directly as
-ECI; orbit is Keplerian circular (no J2 over the short runs).
+Now modeled (previously limitations): the **real IGRF** field (`ppigrf`);
+**J2 secular precession** of the orbit (node regresses −4.6°/day at 550 km /
+51.6°); sun-sensor **cover-glass FOV roll-off**, **per-diode gain mismatch** and
+**normal misalignment**; magnetometer **soft- and hard-iron** distortion; a
+**star-tracker** sensor with anisotropic noise and Sun/Earth keep-out gating; and
+on-orbit / on-ground / star-tracker-referenced **sensor calibration**.
+
+Still simplified / omitted: sun ephemeris uses the ~0.01° analytic series taken
+directly as ECI; orbit is circular (J2 secular rates applied, no drag or higher
+zonal harmonics).
 
 With systematics off (default) the estimator shares the truth's environment
 models, so only sensor noise drives the error — the sub-degree validation

@@ -59,6 +59,7 @@ class SimResult:
     mag_body: np.ndarray     # (N, 3) [T]
     sun_body: np.ndarray     # (N, 3) unit, NaN where invalid
     sun_valid: np.ndarray    # (N,)   bool
+    sun_currents: np.ndarray = None  # (N, M) [A] raw per-face photocurrents
 
     def __len__(self):
         return len(self.t)
@@ -87,7 +88,12 @@ class Scenario:
     seed: int = 0
     # --- systematic (unaveraged) error sources; 0 => truth == model ---
     albedo_coeff: float = 0.0            # Earth-albedo fraction on the sun sensor
-    field_model_error_deg: float = 0.0   # IGRF-vs-dipole field direction error
+    field_model_error_deg: float = 0.0   # synthetic IGRF-vs-dipole direction error
+    # Truth geomagnetic field: "dipole" keeps the tilted-dipole truth with the
+    # synthetic ``field_model_error_deg`` rotation (default, back-compatible);
+    # "igrf" uses the real IGRF-13/14 field as truth, so the dipole-vs-IGRF
+    # discrepancy is physical (the estimator's reference stays the dipole).
+    field_truth: str = "dipole"
 
     def run(self):
         """Generate the truth + sensor timeline as a :class:`SimResult`."""
@@ -112,16 +118,34 @@ class Scenario:
         mag_body = np.empty((n, 3))
         sun_body = np.full((n, 3), np.nan)
         sun_valid = np.zeros(n, dtype=bool)
+        n_faces = len(self.sun_sensor.true_normals)
+        sun_currents = np.zeros((n, n_faces))
         gyro_bias_true = np.empty((n, 3))
+
+        # Precompute the trajectory; the real-IGRF truth field is evaluated over
+        # the whole trajectory in one vectorised call (secular variation is
+        # negligible over a run, so a single coefficient date is used).
+        positions = np.array([self.orbit.position(truth.t[k]) for k in range(n)])
+        if self.field_truth == "igrf":
+            from .environment.igrf import igrf_field_eci_batch
+            B_true_all = igrf_field_eci_batch(positions, jd)
+        elif self.field_truth != "dipole":
+            raise ValueError(f"field_truth must be 'dipole' or 'igrf', "
+                             f"got {self.field_truth!r}")
+        else:
+            B_true_all = None
 
         for k in range(n):
             q, w = truth.q[k], truth.omega[k]
-            r = self.orbit.position(truth.t[k])
+            r = positions[k]
             s_eci = sun_direction_eci(jd[k])
             E = solar_irradiance(jd[k])
             is_lit = eclipse_factor(r, s_eci) > 0.0
             B_ref = magnetic_field_eci(r, jd[k])                      # estimator model
-            B_true = truth_field_eci(r, jd[k], self.field_model_error_deg)  # measured
+            if B_true_all is not None:
+                B_true = B_true_all[k]                                # real IGRF truth
+            else:
+                B_true = truth_field_eci(r, jd[k], self.field_model_error_deg)
 
             r_eci[k], sun_eci[k], irradiance[k], lit[k] = r, s_eci, E, is_lit
             B_eci[k], B_eci_ref[k] = B_true, B_ref
@@ -136,9 +160,11 @@ class Scenario:
             gyro_bias_true[k] = self.gyro.bias
             gyro_meas[k] = self.gyro.measure(w, self.dt, rng)
             mag_body[k] = self.magnetometer.measure(B_true, q, rng)
-            s_hat, valid = self.sun_sensor.measure_sun_vector(
+            currents = self.sun_sensor.measure(
                 to_body(q, s_eci), E, is_lit, rng,
                 albedo_dir_body=nadir_body, albedo_irradiance=albedo_E)
+            sun_currents[k] = currents
+            s_hat, valid = self.sun_sensor.reconstruct(currents, E)
             sun_valid[k] = valid
             if valid:
                 sun_body[k] = s_hat
@@ -148,4 +174,5 @@ class Scenario:
             q_true=truth.q, omega_true=truth.omega, gyro_bias_true=gyro_bias_true,
             r_eci=r_eci, sun_eci=sun_eci, irradiance=irradiance, lit=lit,
             B_eci=B_eci, B_eci_ref=B_eci_ref, gyro_meas=gyro_meas,
-            mag_body=mag_body, sun_body=sun_body, sun_valid=sun_valid)
+            mag_body=mag_body, sun_body=sun_body, sun_valid=sun_valid,
+            sun_currents=sun_currents)

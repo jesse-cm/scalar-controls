@@ -4,11 +4,17 @@ Design point: 550 km altitude, 51.6 deg inclination (an ISS-like orbit chosen
 because its ~35% eclipse fraction stresses the sun-dropout regime where the
 determination budget is won or lost).
 
-Kept deliberately simple — a Keplerian *circular* orbit with fixed elements
-(no J2 nodal precession, which is ~a few deg/day and negligible over the
-few-orbit runs this sim uses). The propagator supplies (position, velocity) in
-ECI: position feeds the eclipse test and the geomagnetic field, velocity is
-available for any velocity-frame diagnostics.
+The default is a Keplerian *circular* orbit with fixed elements. Setting
+``j2=True`` adds the first-order secular effect of Earth's oblateness (J2):
+the ascending node regresses (``raan`` drifts) and the in-plane argument of
+latitude drifts (the combined secular perigee + mean-anomaly rate). At
+550 km / 51.6° the node regresses ~-4.6 deg/day. Over the few-orbit runs the
+determination sim uses this is a small effect, but it matters for multi-day
+propagation and for the sun-geometry / eclipse phasing it slowly shifts.
+
+The propagator supplies (position, velocity) in ECI: position feeds the
+eclipse test and the geomagnetic field, velocity is available for any
+velocity-frame diagnostics.
 """
 from __future__ import annotations
 
@@ -16,7 +22,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..constants import DEG, MU_EARTH, R_EARTH_M
+from ..constants import DEG, J2_EARTH, MU_EARTH, R_EARTH_M
 
 __all__ = ["CircularOrbit"]
 
@@ -44,6 +50,7 @@ class CircularOrbit:
     inclination: float = 51.6 * DEG
     raan: float = 0.0
     arg_lat0: float = 0.0
+    j2: bool = False              # enable first-order J2 secular drift
 
     @property
     def radius(self):
@@ -60,18 +67,46 @@ class CircularOrbit:
         """Orbital period [s]."""
         return 2.0 * np.pi / self.mean_motion
 
-    def _plane(self):
+    @property
+    def raan_dot(self):
+        """Secular nodal regression rate dOmega/dt [rad/s] (0 unless j2)."""
+        if not self.j2:
+            return 0.0
+        return (-1.5 * self.mean_motion * J2_EARTH
+                * (R_EARTH_M / self.radius) ** 2 * np.cos(self.inclination))
+
+    @property
+    def arg_lat_dot_sec(self):
+        """Secular argument-of-latitude drift [rad/s] beyond mean motion (0 unless j2).
+
+        For a circular orbit this is the sum of the secular perigee rate and the
+        secular mean-anomaly rate (both first-order J2, e=0).
+        """
+        if not self.j2:
+            return 0.0
+        fac = (1.5 * self.mean_motion * J2_EARTH
+               * (R_EARTH_M / self.radius) ** 2)
+        s2 = np.sin(self.inclination) ** 2
+        argp_dot = fac * (2.0 - 2.5 * s2)          # perigee precession
+        m_dot = fac * (1.0 - 1.5 * s2)             # mean-anomaly secular rate
+        return argp_dot + m_dot
+
+    def raan_at(self, t):
+        """RAAN [rad] at time ``t`` seconds from epoch (drifts under J2)."""
+        return self.raan + self.raan_dot * t
+
+    def _plane(self, t=0.0):
         """Rotation from the orbital plane (x toward ascending node) to ECI."""
-        return _rz(self.raan) @ _rx(self.inclination)
+        return _rz(self.raan_at(t)) @ _rx(self.inclination)
 
     def state(self, t):
         """Return (r_eci, v_eci) [m], [m/s] at time ``t`` seconds from epoch."""
-        u = self.arg_lat0 + self.mean_motion * t          # argument of latitude
+        u = self.arg_lat0 + (self.mean_motion + self.arg_lat_dot_sec) * t
         a = self.radius
         r_plane = a * np.array([np.cos(u), np.sin(u), 0.0])
         v_mag = a * self.mean_motion
         v_plane = v_mag * np.array([-np.sin(u), np.cos(u), 0.0])
-        Q = self._plane()
+        Q = self._plane(t)
         return Q @ r_plane, Q @ v_plane
 
     def position(self, t):

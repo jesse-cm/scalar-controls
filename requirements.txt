@@ -1,3 +1,4 @@
 numpy>=1.26
 scipy>=1.11
 matplotlib>=3.7
+ppigrf>=2.1   # real IGRF-13/14 geomagnetic field (pure Python; truth-field option)

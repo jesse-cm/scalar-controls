@@ -20,11 +20,23 @@ The absolute scale (R, A, E) cancels in the normalization, so the reported
 direction depends only on the *relative* diode signals — which is why a coarse
 sun sensor's accuracy is set by its signal-to-noise, not its calibration.
 
-Modelled error source: per-diode current noise (shot/read noise + gain
-mismatch) as a fraction of full-scale. NOT modelled (documented systematics a
-real coarse sensor also fights): Earth-albedo contamination, cover-glass
-refraction/FOV roll-off, and diode misalignment. The EKF's measurement noise
-should be sized to cover those in a real deployment.
+Modelled error sources:
+  * per-diode current noise (shot/read noise) as a fraction of full-scale;
+  * Earth-albedo contamination (see ``measure``);
+  * per-diode gain mismatch (``gains``) — a real diode's responsivity*area
+    varies part-to-part, so the recovered vector is pulled off-axis;
+  * cover-glass FOV roll-off (``rolloff``) — under a cover glass the angular
+    response falls *below* the ideal cosine at high incidence (Fresnel
+    reflection losses grow toward grazing). Modelled as
+    ``response = cos * (1 - rolloff*(1-cos))`` (ideal cosine when rolloff=0);
+  * per-diode normal misalignment (``true_normals``) — the physical face
+    normals differ slightly from the nominal cube axes the reconstruction
+    assumes, a fixed systematic tilt.
+
+``gains``, ``rolloff`` and ``true_normals`` are the calibratable systematics the
+on-ground response-curve calibration characterises and removes. Defaults leave
+the sensor ideal (unit gains, no roll-off, nominal normals) so existing
+baselines are unchanged.
 """
 from __future__ import annotations
 
@@ -63,22 +75,45 @@ class SunSensorArray:
     # only ~noise (few % of full-scale) in eclipse, so 0.2 cleanly separates the
     # two and keeps eclipse noise from ever faking a valid sun fix.
     min_signal_frac: float = 0.2
-    normals: np.ndarray = None  # defaults to CUBE_FACE_NORMALS
+    normals: np.ndarray = None  # nominal normals used by reconstruct(); default cube
+    # --- calibratable systematics (defaults => ideal sensor) ---
+    gains: np.ndarray = None            # per-diode multiplicative gain; default ones
+    rolloff: float = 0.0                # cover-glass FOV roll-off coefficient
+    true_normals: np.ndarray = None     # physical normals; default == nominal
 
     def __post_init__(self):
         if self.normals is None:
             self.normals = CUBE_FACE_NORMALS.copy()
+        if self.gains is None:
+            self.gains = np.ones(len(self.normals))
+        if self.true_normals is None:
+            self.true_normals = self.normals.copy()
 
     def full_scale_current(self, irradiance):
         """Photocurrent [A] of a diode facing the Sun head-on at ``irradiance``."""
         return self.responsivity * self.area * irradiance
 
+    def _angular_response(self, cos):
+        """Diode angular response vs the ideal cosine, with cover-glass roll-off.
+
+        rolloff=0 -> ideal Lambertian cosine. rolloff>0 -> response falls below
+        the cosine as incidence grows (factor 1 at normal incidence, less toward
+        grazing). Non-negative and zero when the Sun is behind the face.
+        """
+        cos = np.clip(cos, 0.0, None)
+        return cos * (1.0 - self.rolloff * (1.0 - cos))
+
     def currents(self, sun_dir_body, irradiance, lit=True):
-        """Noiseless per-face photocurrents [A] (zeros in eclipse)."""
+        """Noiseless per-face photocurrents [A] (zeros in eclipse).
+
+        Uses the *physical* face normals, per-diode gains and cover-glass
+        roll-off — i.e. what the hardware actually produces.
+        """
         if not lit:
-            return np.zeros(len(self.normals))
-        cos = self.normals @ np.asarray(sun_dir_body, dtype=float)
-        return self.full_scale_current(irradiance) * np.clip(cos, 0.0, None)
+            return np.zeros(len(self.true_normals))
+        cos = self.true_normals @ np.asarray(sun_dir_body, dtype=float)
+        resp = self._angular_response(cos)
+        return self.full_scale_current(irradiance) * self.gains * resp
 
     def measure(self, sun_dir_body, irradiance, lit, rng,
                 albedo_dir_body=None, albedo_irradiance=0.0):
@@ -93,9 +128,9 @@ class SunSensorArray:
         fs = self.full_scale_current(irradiance)
         ideal = self.currents(sun_dir_body, irradiance, lit)
         if lit and albedo_dir_body is not None and albedo_irradiance > 0.0:
-            cos_a = self.normals @ np.asarray(albedo_dir_body, dtype=float)
+            cos_a = self.true_normals @ np.asarray(albedo_dir_body, dtype=float)
             ideal = ideal + (self.responsivity * self.area * albedo_irradiance
-                             * np.clip(cos_a, 0.0, None))
+                             * self.gains * np.clip(cos_a, 0.0, None))
         noise = rng.normal(0.0, self.noise_frac * fs, size=ideal.shape)
         return np.clip(ideal + self.dark_frac * fs + noise, 0.0, None)
 
