@@ -1,0 +1,29 @@
+hand-picked design, seed 0 (15 s): reward +0.67
+   PASS  acq_settle_h        5.367  <= 6.0
+   PASS  acq_diverged        0.000  <= 0.0
+   FAIL  fine_point_mean     9.186  <= 5.0
+   FAIL  fine_point_p95     29.377  <= 15.0
+   PASS  fine_max_rate       0.217  <= 0.5
+   PASS  fine_sat_frac       0.000  <= 0.2
+   PASS  fine_power_w        0.061  <= 0.3
+   PASS  fine_diverged       0.000  <= 0.0
+
+CEM: pop 16, 6 generations, train seeds (0, 1) ...
+gen 0: best +2.28  mean -0.55  mu={'theta_max': 21.333, 'omega_max': 0.176, 'rho': 0.565, 'enter': 0.208, 'exit': 1.06, 'k_damp': 26782.771}
+gen 1: best +2.27  mean +0.35  mu={'theta_max': 20.276, 'omega_max': 0.172, 'rho': 0.471, 'enter': 0.244, 'exit': 1.107, 'k_damp': 26946.552}
+gen 2: best +2.24  mean +0.96  mu={'theta_max': 20.23, 'omega_max': 0.15, 'rho': 0.658, 'enter': 0.261, 'exit': 1.093, 'k_damp': 20372.042}
+gen 3: best +2.16  mean -0.65  mu={'theta_max': 19.152, 'omega_max': 0.152, 'rho': 0.361, 'enter': 0.242, 'exit': 1.155, 'k_damp': 22934.286}
+gen 4: best +2.23  mean +1.21  mu={'theta_max': 20.267, 'omega_max': 0.172, 'rho': 0.358, 'enter': 0.233, 'exit': 1.214, 'k_damp': 23529.958}
+gen 5: best +2.24  mean +0.17  mu={'theta_max': 22.633, 'omega_max': 0.191, 'rho': 0.358, 'enter': 0.238, 'exit': 1.227, 'k_damp': 15868.522}
+
+best params: {'theta_max': 27.1303, 'omega_max': 0.2451, 'rho': 0.7952, 'enter': 0.1505, 'exit': 1.1781, 'k_damp': 28500.893}
+   PASS  acq_settle_h        3.673  <= 6.0
+   PASS  acq_diverged        0.000  <= 0.0
+   FAIL  fine_point_mean     6.675  <= 5.0
+   FAIL  fine_point_p95     19.055  <= 15.0
+   PASS  fine_max_rate       0.173  <= 0.5
+   PASS  fine_sat_frac       0.000  <= 0.2
+   PASS  fine_power_w        0.047  <= 0.3
+   PASS  fine_diverged       0.000  <= 0.0
+
+saved results/lqr_tuned_cal.json  (7.1 min)

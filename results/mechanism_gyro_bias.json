@@ -1,0 +1,189 @@
+{
+  "setup": {
+    "seed_main": 100,
+    "n_orbits": 3,
+    "dt": 1.0,
+    "orbit_period_s": 5738.992815014798,
+    "params_path": "results/lqr_tuned_3mode.json",
+    "K_shape": [
+      256,
+      3,
+      6
+    ]
+  },
+  "T1": {
+    "r_median_per_axis_s": [
+      341.35462044869087,
+      149.35953224307335,
+      448.9531264442771
+    ],
+    "r_min_per_axis_s": [
+      50.07021423616599,
+      91.64340163463626,
+      20.405698211305758
+    ],
+    "r_max_per_axis_s": [
+      608.0482956905846,
+      508.90405338243215,
+      10513.961612583485
+    ],
+    "r_median_all_s": 299.21595365129986,
+    "r_range_all_s": [
+      20.405698211305758,
+      10513.961612583485
+    ],
+    "observed_pointing_mean_deg": 7.400363508176803,
+    "observed_knowledge_mean_deg": 2.159659143187996,
+    "pred_mean_deg_per_bin_r": 3.5730772152681682,
+    "pred_mean_deg_median_r": 3.5076900090482876,
+    "pred_mean_deg_full_matrix": 5.419139091016199,
+    "ratio_pred_over_obs_per_bin_r": 0.48282455467494356,
+    "ratio_pred_over_obs_median_r": 0.47398887975875426,
+    "ratio_pred_over_obs_full_matrix": 0.7322801217843541,
+    "isolated_rate_path": {
+      "observed_pointing_mean_deg": 3.6506169883434425,
+      "pred_mean_deg_per_bin_r": 3.5516558921874672,
+      "pred_mean_deg_median_r": 3.495959357603928,
+      "pred_mean_deg_full_matrix": 5.483945605372728,
+      "ratio_pred_over_obs_per_bin_r": 0.9728919532035374,
+      "ratio_pred_over_obs_median_r": 0.9576352076283702,
+      "ratio_pred_over_obs_full_matrix": 1.5021969225703964
+    }
+  },
+  "T2": {
+    "baseline": {
+      "pointing_mean_deg": 7.400363508176803,
+      "pointing_p95_deg": 17.98183700578597,
+      "knowledge_mean_deg": 2.159659143187996,
+      "knowledge_median_deg": 1.5416781002514333,
+      "sat_frac": 0.0016844795539033457
+    },
+    "true_rate": {
+      "pointing_mean_deg": 3.96772010614872,
+      "pointing_p95_deg": 9.180370091606298,
+      "knowledge_mean_deg": 2.149543024574585,
+      "knowledge_median_deg": 1.55654557580681,
+      "sat_frac": 0.00011617100371747211
+    },
+    "true_attitude": {
+      "pointing_mean_deg": 3.6506169883434425,
+      "pointing_p95_deg": 8.027011786281582,
+      "knowledge_mean_deg": 2.187879085181083,
+      "knowledge_median_deg": 1.5930532248175036,
+      "sat_frac": 0.0014521375464684014
+    },
+    "perfect_gyro": {
+      "pointing_mean_deg": 1.0817945026861777,
+      "pointing_p95_deg": 1.7806467473000969,
+      "knowledge_mean_deg": 0.7565049678996447,
+      "knowledge_median_deg": 0.7621770167493539,
+      "sat_frac": 0.0015683085501858737
+    }
+  },
+  "T3": {
+    "100": {
+      "r(bin) (*) db": {
+        "median_cos": -0.27129062064222687,
+        "median_abs_cos": 0.7022389715086446,
+        "frac_abs_cos_gt_0.9": 0.21732310909724642
+      },
+      "median(r) (*) db": {
+        "median_cos": -0.2685088084319199,
+        "median_abs_cos": 0.689667760784859,
+        "frac_abs_cos_gt_0.9": 0.22830254444057163
+      },
+      "-K_theta^-1 K_omega db": {
+        "median_cos": 0.1816012595214897,
+        "median_abs_cos": 0.7074993469165939,
+        "frac_abs_cos_gt_0.9": 0.2302195887068665
+      },
+      "pointing_mean_deg": 7.400363508176803,
+      "knowledge_mean_deg": 2.159659143187996
+    },
+    "101": {
+      "r(bin) (*) db": {
+        "median_cos": -0.15391076613063606,
+        "median_abs_cos": 0.5502635177706354,
+        "frac_abs_cos_gt_0.9": 0.19745555942837226
+      },
+      "median(r) (*) db": {
+        "median_cos": -0.1877592509643783,
+        "median_abs_cos": 0.5768037081830022,
+        "frac_abs_cos_gt_0.9": 0.22359707215057512
+      },
+      "-K_theta^-1 K_omega db": {
+        "median_cos": 0.30544714532583706,
+        "median_abs_cos": 0.6661709846355307,
+        "frac_abs_cos_gt_0.9": 0.19048448936911816
+      },
+      "pointing_mean_deg": 6.733081943877652,
+      "knowledge_mean_deg": 2.057236449900702
+    },
+    "100_true_att": {
+      "r(bin) (*) db": {
+        "median_cos": -0.27925568376800747,
+        "median_abs_cos": 0.623662078236838,
+        "frac_abs_cos_gt_0.9": 0.14865806901359357
+      },
+      "median(r) (*) db": {
+        "median_cos": -0.254271585441603,
+        "median_abs_cos": 0.6084549095642638,
+        "frac_abs_cos_gt_0.9": 0.16486580690135935
+      },
+      "-K_theta^-1 K_omega db": {
+        "median_cos": 0.09260282333281564,
+        "median_abs_cos": 0.6709704403868031,
+        "frac_abs_cos_gt_0.9": 0.1427326594632276
+      },
+      "pointing_mean_deg": 3.6506169883434425,
+      "knowledge_mean_deg": 2.187879085181083
+    }
+  },
+  "T4": {
+    "default gyro (bias_rw 1e-5)": {
+      "db_norm_median_deg_s": 0.009217871216342776,
+      "db_norm_p95_deg_s": 0.01836254994690397,
+      "db_per_axis_median_deg_s": [
+        0.0047965716359487515,
+        0.0028657058646577435,
+        0.004240068720191567
+      ],
+      "db_per_axis_p95_deg_s": [
+        0.013227511246786634,
+        0.007999729774891632,
+        0.014166653538181745
+      ],
+      "b_true_drift_deg_s": 0.03644994583962404
+    },
+    "perfect gyro (bias_rw 0)": {
+      "db_norm_median_deg_s": 3.4937623030687636e-05,
+      "db_norm_p95_deg_s": 4.848782015048485e-05,
+      "db_per_axis_median_deg_s": [
+        7.253467826099342e-06,
+        3.087315297640922e-05,
+        6.435049273525669e-06
+      ],
+      "db_per_axis_p95_deg_s": [
+        2.1464955533555878e-05,
+        3.864003637905053e-05,
+        3.092105073991027e-05
+      ],
+      "b_true_drift_deg_s": 0.0
+    },
+    "seed 101, default gyro": {
+      "db_norm_median_deg_s": 0.010497350136263408,
+      "db_norm_p95_deg_s": 0.021058964501607092,
+      "db_per_axis_median_deg_s": [
+        0.0055539492964281605,
+        0.0024773031283383874,
+        0.005378508458419079
+      ],
+      "db_per_axis_p95_deg_s": [
+        0.01897328917478583,
+        0.007220466403512603,
+        0.014014122849338383
+      ],
+      "b_true_drift_deg_s": 0.10263124570308077
+    }
+  }
+}

@@ -1,0 +1,29 @@
+hand-picked design, seed 0 (15 s): reward +0.73
+   PASS  acq_settle_h        5.357  <= 6.0
+   PASS  acq_diverged        0.000  <= 0.0
+   FAIL  fine_point_mean     9.126  <= 5.0
+   FAIL  fine_point_p95     29.135  <= 15.0
+   PASS  fine_max_rate       0.224  <= 0.5
+   PASS  fine_sat_frac       0.000  <= 0.2
+   PASS  fine_power_w        0.047  <= 0.3
+   PASS  fine_diverged       0.000  <= 0.0
+
+CEM: pop 16, 6 generations, train seeds (0, 1) ...
+gen 0: best +2.28  mean -0.48  mu={'theta_max': 33.723, 'omega_max': 0.216, 'rho': 0.75, 'enter': 0.17, 'exit': 1.176, 'k_damp': 32092.528, 'fine_theta_max': 24.96, 'fine_omega_max': 0.282, 'fine_rho': 0.504}
+gen 1: best +2.26  mean -1.38  mu={'theta_max': 35.688, 'omega_max': 0.21, 'rho': 0.773, 'enter': 0.241, 'exit': 1.229, 'k_damp': 27927.469, 'fine_theta_max': 22.161, 'fine_omega_max': 0.278, 'fine_rho': 0.376}
+gen 2: best +2.26  mean -0.21  mu={'theta_max': 35.034, 'omega_max': 0.22, 'rho': 0.616, 'enter': 0.277, 'exit': 1.202, 'k_damp': 21245.304, 'fine_theta_max': 24.576, 'fine_omega_max': 0.271, 'fine_rho': 0.386}
+gen 3: best +2.28  mean +1.21  mu={'theta_max': 36.56, 'omega_max': 0.242, 'rho': 0.545, 'enter': 0.285, 'exit': 1.209, 'k_damp': 31118.11, 'fine_theta_max': 26.42, 'fine_omega_max': 0.322, 'fine_rho': 0.48}
+gen 4: best +2.28  mean +0.29  mu={'theta_max': 36.595, 'omega_max': 0.242, 'rho': 0.245, 'enter': 0.272, 'exit': 1.22, 'k_damp': 13593.465, 'fine_theta_max': 24.479, 'fine_omega_max': 0.307, 'fine_rho': 0.509}
+gen 5: best +2.30  mean +0.21  mu={'theta_max': 41.082, 'omega_max': 0.195, 'rho': 0.194, 'enter': 0.293, 'exit': 1.161, 'k_damp': 20483.557, 'fine_theta_max': 23.971, 'fine_omega_max': 0.316, 'fine_rho': 0.853}
+
+best params: {'theta_max': 39.4884, 'omega_max': 0.2477, 'rho': 0.8559, 'enter': 0.3722, 'exit': 1.15, 'k_damp': 73922.2623, 'fine_theta_max': 24.3898, 'fine_omega_max': 0.2749, 'fine_rho': 0.7665}
+   PASS  acq_settle_h        3.562  <= 6.0
+   PASS  acq_diverged        0.000  <= 0.0
+   FAIL  fine_point_mean     6.577  <= 5.0
+   FAIL  fine_point_p95     18.522  <= 15.0
+   PASS  fine_max_rate       0.194  <= 0.5
+   PASS  fine_sat_frac       0.000  <= 0.2
+   PASS  fine_power_w        0.050  <= 0.3
+   PASS  fine_diverged       0.000  <= 0.0
+
+saved results/lqr_tuned_3mode.json  (7.7 min)
