@@ -243,6 +243,41 @@ def test_as_built_rows_are_table_g(rep, ledger):
         assert names == ({"acq_diverged", "acq_settle_h"} if episode == "acq" else {"fine_diverged", "fine_point_mean"})
 
 
+_TUNED = re.compile(r"^s6_(acq|fine)\d+_[a-z]+mag_lqr_tuned_3mode(?:\+(.+))?$")
+
+
+def test_headline_is_short_and_shows_every_tag_of_the_tuned_controller(rep, ledger):
+    text = report.headline_text()
+    lines = text.splitlines()
+    rows = rep.headline["rows"]
+    assert len(lines) <= 7 + len(rows)                  # title, note, column heads, hardware, footer: one row per tag
+    assert len(lines) <= 40 and max(len(line) for line in lines) <= report.WIDTH
+    assert lines[-1].startswith("Full tables:") and "docs/RESULTS.md" in lines[-1]
+    labels = [lab for lab, _ in rows]
+    tags = {(m.group(2) or "no switch") + (" (acq)" if m.group(1) == "acq" else "")
+            for r in ledger for m in [_TUNED.match(r["scenario"])] if m and not all(
+                r[c] == "" for c in r if "__" in c)}
+    assert tags and tags <= set(labels), tags - set(labels)
+    built = {f"as built: {r['scenario'].split('_', 2)[2]}" + (" (acq)" if r["scenario"].startswith("hw_acq") else "")
+             for r in ledger if r["scenario"].startswith("hw_")}
+    assert built and built <= set(labels)
+    assert any(line.lstrip().startswith("hardware.json:") for line in lines)
+    full = report.render_terminal(rep)
+    assert full.index(lines[0]) < full.index("\nA1. ")    # the headline sits on top of the tables
+    for lab, cells in rows:
+        for c in cells:
+            assert c == "-" or c.split()[-1] in ("PASS", "FAIL"), (lab, c)
+
+
+def test_a_new_tag_of_the_tuned_controller_reaches_the_headline(tmp_path, ledger):
+    tuned = next(r for r in ledger if _TUNED.match(r["scenario"]) and "+" not in r["scenario"]
+                 and r["scenario"].startswith("s6_fine") and r["seed_set"] == "0-39")
+    rep2 = report.build(ledger_path=_ledger_with(tmp_path, ledger, [
+        dict(tuned, scenario=tuned["scenario"] + "+zz9_neverseen", estimator="mekf+zz_front")]))
+    assert "zz9_neverseen" in [lab for lab, _ in rep2.headline["rows"]]
+    assert "zz_front" in rep2.headline["fronts"]
+
+
 def test_results_md_is_what_the_command_writes(rep):
     with open(report.RESULTS_MD, encoding="utf-8") as f:
         committed = f.read()
@@ -273,7 +308,7 @@ def test_pytest_hook_prints_the_scoreboard_and_never_raises(rep, monkeypatch):
     conftest = _load("scalar_conftest_under_test", os.path.join(ROOT, "conftest.py"))
     out = _Reporter()
     conftest.pytest_terminal_summary(out, 0, _Config())
-    assert "\n".join(out.lines[1:]) + "\n" == report.render_terminal(rep)
+    assert "\n".join(out.lines[1:]) + "\n" == report.render_headline(rep) + report.HEADLINE_FOOTER.replace("`", "") + "\n"
 
     off = _Reporter()
     conftest.pytest_terminal_summary(off, 0, _Config(**{"--no-scoreboard": True}))

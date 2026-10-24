@@ -16,8 +16,8 @@ Needs Python 3 (checked with 3.13). Run everything from the repository root.
 ```bash
 pip install -r requirements.txt     # numpy, scipy, matplotlib, ppigrf (Earth's magnetic field model)
 pip install pytest torch            # not in requirements.txt; torch is only for the sun-sensor network
-python3 -m pytest tests -q          # the tests; ends with the scoreboard (--no-scoreboard leaves it out)
-python3 scripts/report.py           # the scoreboard alone, in under a second; runs no simulation
+python3 -m pytest tests -q          # the tests; ends with the scoreboard's headline (--no-scoreboard leaves it out)
+python3 scripts/report.py           # headline, then every table, in under a second; runs no simulation
 python3 scripts/report.py --write   # the same, and regenerates docs/RESULTS.md
 python3 scripts/matrix.py --list    # the scenarios a simulation run can add rows for; runs nothing
 ```
@@ -75,8 +75,9 @@ behind the control half: [docs/learned-estimation-and-control.md](docs/learned-e
 
 ## 3. What the scoreboard shows
 
-The tables `scripts/report.py` prints. [docs/RESULTS.md](docs/RESULTS.md) is
-the same tables saved; the numbers live there, not here.
+The tables `scripts/report.py` prints, under a headline: the tuned controller
+plain, with each switch, and as built, one line each. [docs/RESULTS.md](docs/RESULTS.md) is
+the same saved; the numbers live there, not here.
 
 | Table | What it shows |
 |---|---|

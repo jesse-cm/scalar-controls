@@ -1,9 +1,9 @@
-"""pytest configuration: print the results scoreboard at the end of every test run.
+"""pytest configuration: print the headline of the results scoreboard at the end of every test run.
 
-The scoreboard is the output of ``python3 scripts/report.py``: it reads
-results/ledger.csv and results/crosscheck_basilisk.json and runs no simulation.
-It never changes the outcome of the test run; if it cannot be built, one line
-says why. ``--no-scoreboard`` leaves it out.
+The headline is the top of ``python3 scripts/report.py`` (``report.headline_text``), followed by
+one line saying where the full tables are; it reads results/ledger.csv and hardware.json and
+runs no simulation. It never changes the outcome of the test run; if it cannot be built, one
+line says why. ``--no-scoreboard`` leaves it out.
 """
 import importlib.util
 import os
@@ -25,9 +25,9 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         report = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = report            # dataclasses look the module up by name
         spec.loader.exec_module(report)
-        text = report.terminal_text()
+        text = report.headline_text()
     except Exception as e:  # noqa: BLE001  (the scoreboard must never fail a test run)
         terminalreporter.write_line(f"results scoreboard not shown ({type(e).__name__}: {e})")
         return
-    terminalreporter.write_sep("=", "results scoreboard (python3 scripts/report.py)")
+    terminalreporter.write_sep("=", "results headline (python3 scripts/report.py)")
     terminalreporter.write_line(text.rstrip("\n"))
