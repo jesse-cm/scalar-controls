@@ -24,7 +24,10 @@ WHERE THE NUMBERS COME FROM
     bias, soft iron      rl_tune.Plant defaults, scalar/control/rl_tune.py lines 75-77
                          (the "1.5 uT bias, 5 % soft iron" plant of the notes, section 6)
     quantisation         0.15 uT, docs/verification-loop-plan.md row 1c
-    temperature drift    ASSUMED, both the coefficient and the profile; see below
+    temperature drift    hardware.json (magnetometer.temp_coeff and the board_temperature entries),
+                         read through scalar/hardware.py; as shipped both are "assumed", and each
+                         entry's note says which bench test replaces it. Editing the file changes
+                         what this script runs; the rows it already wrote stay as they are.
 """
 from __future__ import annotations
 
@@ -34,21 +37,19 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from scalar import hardware  # noqa: E402
 from scalar.control.rl_tune import default_plant  # noqa: E402
 from scalar.harness import baseline_specs  # noqa: E402
 from scalar.sensors.magnetometer import LIS2MDL_LSB_T  # noqa: E402
 
-# ASSUMED. Offset drift of the magnetometer per kelvin, per axis [T/K]. No file in this repo
-# states it. Replaced by the plan's phase-5 item "gyro and magnetometer logs across a
-# temperature ramp with the TMP112s": the slope of each axis' offset against TMP112 temperature.
-ASSUMED_TEMP_COEFF_T_PER_K = (30e-9, -20e-9, 10e-9)
+_HW = hardware.load()
 
-# ASSUMED. Board temperature at the magnetometer: one sinusoid per orbit, this many kelvin
-# either side of its mean, starting at the mean. Replaced by a TMP112 log over an orbit
-# (thermal-vacuum cycle or flight telemetry) fed through
-# scalar.sensors.magnetometer.tabulated_temperature.
-ASSUMED_TEMP_AMP_K = 15.0
-ASSUMED_TEMP_PHASE_DEG = 0.0
+# From hardware.json (one home per number); the names are kept for the tests that use them.
+# The board temperature is a swing (amplitude, phase) or a logged profile; with a log, the two
+# swing names are None and realism_fields passes the log.
+ASSUMED_TEMP_COEFF_T_PER_K = _HW.require("magnetometer", "temp_coeff", "scripts/mag_realism.py")
+ASSUMED_TEMP_AMP_K = _HW.value("board_temperature", "swing_amplitude")
+ASSUMED_TEMP_PHASE_DEG = _HW.value("board_temperature", "swing_phase")
 
 
 def realism_fields(bias_soft_iron=True, quantisation=True, temperature=True):
@@ -61,9 +62,7 @@ def realism_fields(bias_soft_iron=True, quantisation=True, temperature=True):
     if quantisation:
         kw["mag_quant_T"] = LIS2MDL_LSB_T
     if temperature:
-        kw["mag_temp_coeff_T_per_K"] = ASSUMED_TEMP_COEFF_T_PER_K
-        kw["mag_temp_amp_K"] = ASSUMED_TEMP_AMP_K
-        kw["mag_temp_phase_deg"] = ASSUMED_TEMP_PHASE_DEG
+        kw.update(hardware.temperature_fields(_HW, ("mag",), required=True)[0])
     return kw
 
 

@@ -29,12 +29,12 @@ no column in the fixed metric set, so it cannot be a ledger row; this prints it
 one term at a time and all together, as median / p95 across the seed set.
 
 WHERE THE NUMBERS COME FROM
-    scale factor     1 %, docs/verification-loop-plan.md row 1h. Which axes and which sign: ASSUMED.
-    misalignment     0.5 deg, same row. About which axis: ASSUMED.
-    quantisation     ASSUMED. The row says "at the FS in use"; the full-scale range the flight
-                     code sets is not in this repo, and neither is the LSB that goes with it.
-    temperature      ASSUMED coefficient. The board temperature is the magnetometer row's
-                     (scripts/mag_realism.py, itself ASSUMED), so both sensors see one board.
+    hardware.json at the repository root, read through scalar/hardware.py: gyro.scale_factor,
+    gyro.misalignment, gyro.lsb, gyro.temp_coeff and the board_temperature entries. Each entry's
+    note says where its number comes from and which bench test replaces it; as shipped all are
+    "assumed" (the 1 % and the 0.5 deg are the plan's, row 1h; the signs, the axis, the step and the
+    coefficient are not in any source). Editing the file changes what this script runs; the rows
+    it already wrote stay as they are in the ledger.
 """
 from __future__ import annotations
 
@@ -46,38 +46,22 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from mag_realism import ASSUMED_TEMP_AMP_K, ASSUMED_TEMP_PHASE_DEG  # noqa: E402  (one board temperature)
+from scalar import hardware  # noqa: E402
 from scalar.harness.baseline import select_specs  # noqa: E402
 
-# From the plan, row 1h: "1 % scale factor".
+_HW = hardware.load()
+_WHO = "scripts/gyro_realism.py"
+
+# The plan's sizes, row 1h ("1 % scale factor", "0.5 deg misalignment"); kept as the plan's words.
+# The rows use the per-axis values of hardware.json below, not these.
 PLAN_SCALE_FACTOR = 0.01
-# ASSUMED. The plan gives the size only. Here: the same sign on all three axes, so the sensor
-# reads every rate 1 % high. Replaced by a rate-table run of the flight board (each axis at a
-# known rate, both directions); phase 5 of the plan lists no such item yet.
-ASSUMED_SCALE_FACTOR_SIGNS = (1.0, 1.0, 1.0)
-
-# From the plan, row 1h: "0.5 deg misalignment".
 PLAN_MISALIGN_DEG = 0.5
-# ASSUMED. The plan gives the angle only. Here: the sensor triad turned as a whole about the body
-# diagonal, so no axis is spared. Replaced by the same rate-table run (cross-axis response).
-ASSUMED_MISALIGN_AXIS = (1.0, 1.0, 1.0)
 
-# ASSUMED. Size of one output step [deg/s]. The row says "quantisation at the FS in use": the
-# full-scale range the flight code writes to the gyro is not in this repo, and no file here gives
-# the step for any range. The value is the author's recollection of the LSM6DSO sensitivity at
-# its +-250 deg/s range, NOT checked against the datasheet or the flight code. Replaced by: the
-# range setting read from the flight driver, and the step measured on the bench (the 2 h static
-# log of phase 5 shows it directly as the spacing of the raw output values).
-# The model rounds the one sample it produces per step; if the flight code averages several
-# raw samples per estimator step the effective step is finer than this.
-ASSUMED_GYRO_LSB_DEG_S = 8.75e-3
-
-# ASSUMED. Drift of the zero-rate output per kelvin, per axis [deg/s/K]. No file in this repo
-# states it; the size is the author's recollection of the datasheet's typical figure, unchecked,
-# and the signs are a choice. Replaced by the plan's phase-5 item "gyro and magnetometer logs
-# across a temperature ramp with the TMP112s": the slope of each axis' static output against
-# TMP112 temperature.
-ASSUMED_GYRO_TEMP_COEFF_DEG_S_PER_K = (0.010, -0.010, 0.010)
+# From hardware.json (one home per number). The ASSUMED_ names are kept for the tests that use them.
+GYRO_SCALE_FACTOR = _HW.require("gyro", "scale_factor", _WHO)         # fraction, per axis
+GYRO_MISALIGN_DEG = _HW.require("gyro", "misalignment", _WHO)         # rotation vector [deg]
+ASSUMED_GYRO_LSB_DEG_S = _HW.require("gyro", "lsb", _WHO)
+ASSUMED_GYRO_TEMP_COEFF_DEG_S_PER_K = _HW.require("gyro", "temp_coeff", _WHO)
 
 TERMS = ("temperature", "scale_factor", "misalignment", "quantisation")
 LEDGER_BASES = ("e2_alongtrack_0km", "s6_acq120_calmag_lqr_tuned_3mode", "s6_fine20_calmag_lqr_tuned_3mode")
@@ -88,14 +72,12 @@ def realism_fields(temperature=True, scale_factor=True, misalignment=True, quant
     """ScenarioSpec keyword arguments that switch the chosen row-1h terms on."""
     kw = {}
     if temperature:
-        kw["gyro_temp_coeff_deg_s_per_K"] = ASSUMED_GYRO_TEMP_COEFF_DEG_S_PER_K
-        kw["gyro_temp_amp_K"] = ASSUMED_TEMP_AMP_K
-        kw["gyro_temp_phase_deg"] = ASSUMED_TEMP_PHASE_DEG
+        # the board temperature is hardware.json's, shared with scripts/mag_realism.py: one board
+        kw.update(hardware.temperature_fields(_HW, ("gyro",), required=True)[0])
     if scale_factor:
-        kw["gyro_scale_factor"] = tuple(PLAN_SCALE_FACTOR * s for s in ASSUMED_SCALE_FACTOR_SIGNS)
+        kw["gyro_scale_factor"] = GYRO_SCALE_FACTOR
     if misalignment:
-        axis = np.array(ASSUMED_MISALIGN_AXIS, float)
-        kw["gyro_misalign_deg"] = tuple(float(x) for x in PLAN_MISALIGN_DEG * axis / np.linalg.norm(axis))
+        kw["gyro_misalign_deg"] = GYRO_MISALIGN_DEG
     if quantisation:
         kw["gyro_quant_deg_s"] = ASSUMED_GYRO_LSB_DEG_S
     return kw
