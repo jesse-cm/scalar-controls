@@ -1,7 +1,8 @@
 # Verification loop plan — SCALAR estimation and control
 
 Written 2026-09-12. Companion to `learned-estimation-and-control.md`, whose
-conclusions are the things under test. Nothing in this plan is executed yet.
+conclusions are the things under test. What has been executed so far is in
+[Status](#status) at the end of this file.
 
 ## Rules of the loop
 
@@ -109,3 +110,77 @@ Each measured number replaces a `ScenarioSpec` default and re-runs phase 3.
 Phase 0 first, alone. Phases 1a–1h and 2 in parallel (9 agents). Phase 3 after
 1 completes. Phase 4 after 3. Phase 5 whenever hardware time exists; it feeds
 back into 3. Estimated agent count: 1 + 9 + 3 + up to 5 = 18 over four rounds.
+
+## Status
+
+Dated entries, newest last. Each entry names the rows or the file it rests on.
+
+### 2026-10-24 — phase 0 (harness) done
+
+- Code: `scalar/harness/`, `scripts/matrix.py`, `tests/test_harness.py`.
+  Ledger: `results/ledger.csv`, 174 rows: 62 baseline scenarios over seeds
+  0–39, plus single-seed rows. All rows carry git hash `b5217a8+dirty`.
+- Gate, re-run with `python3 scripts/matrix.py --gate --no-ledger`: of the 123
+  numbers in sections 1–5 of the notes, 117 reproduce at the seed the script
+  hard-codes, 2 do not, and 4 are worded too loosely to score.
+  - Not reproduced: section 2, 100 km row, p95 (notes 2.7, harness 2.65);
+    section 4, "90–110°" for the projected LQR (one of four weight sets gives
+    89.11).
+  - Not scored: "residual dipole to ~0.3 mA m²" (0.59 at the script's seed)
+    and "rates to 20°/s" (21.1 to 28.9).
+- The plan's assumption that seed 2 produced the notes holds only for
+  experiments 4 and 5. Experiments 1–3 use other seeds (7, 3, 5, 100, 190); at
+  seed 2, 49 of their numbers do not match.
+
+What the 40-seed rows say (ledger rows with seed set `0-39`; "diverged" is the
+plan's flag, pointing above 90° in the last orbit):
+
+| Scenario (section of the notes) | Notes, one seed | Diverged, of 40 | Pointing mean, median / p95 across seeds |
+|---|---|---|---|
+| Two-mode controller with the MEKF in the loop (4) | 3.0° | 11 | 5.75° / 129.5° |
+| Fine pointing, analytic sun front end, albedo 0 (5) | 5.9° | 3 | 6.75° / 92.3° |
+| Fine pointing, analytic, albedo 0.3 and 0.5 (5) | diverged | 40 and 40 | 109° and 115° |
+| Fine pointing, MLP-B, albedo 0 (5) | 5.9° | 4 | 8.26° / 121.9° |
+| Fine pointing, MLP-B, albedo 0.3 (5) | 5.1° | 4 | 7.97° / 105.5° |
+| Fine pointing, MLP-B, albedo 0.5 (5) | 10.4° | 27 | 45.7° / 124.5° |
+
+Conclusions against rule 4 ("Monte Carlo or it did not happen"):
+
+1. The single-seed closed-loop numbers in sections 4 and 5 of the notes are
+   draws from the good part of the spread. The hand-picked September design
+   loses pointing on roughly a tenth to a quarter of seeds even in its best
+   cases.
+2. Section 5's claim that the learned front end lets the loop survive albedo
+   holds at albedo 0.3 (4 of 40 diverge, against 40 of 40 for the analytic
+   front end) and does not hold at albedo 0.5 (27 of 40 diverge).
+3. These rows are the September hand-picked design, not the tuned three-mode
+   controller of sections 6–8. That controller has no 40-seed row yet.
+
+Not yet ledger rows, so not conclusions under rule 1: the sun-vector errors
+of experiment 1 and the identification errors of experiment 3 have no column
+in the fixed metric set. `python3 scripts/matrix.py --per-seed PATH` prints
+them.
+
+### 2026-10-24 — phase 2 (independent cross-check) done
+
+Basilisk 2.12.2, same orbit, inertia, sensors and coils. Result, gate table
+and every discrepancy with its confirming run:
+[crosscheck-basilisk.md](crosscheck-basilisk.md); numbers in
+`results/crosscheck_basilisk.json`; one command, `python3
+scripts/crosscheck_basilisk.py`. Outcome in one line: conventions, signs,
+orbit and sensor scale agree; the gate fails on the detumble orbit and on the
+README-default free tumble, for three causes in our plant (torque held instead
+of dipole over a step, second-order attitude step, frame labelled J2000 but
+of-date). The first two enter phase 1 as switches; the first must land before
+row 1e is run.
+
+### Not started
+
+Phases 1, 3 and 4. Phase 5 needs the hardware.
+
+### Open
+
+Acquisition results for `results/lqr_tuned_3mode.json` do not reconcile
+between its stored `train_metrics`, `results/lqi_fine.json` and a run today
+(seeds 0 and 1 reproduce the stored numbers; seed 101 diverges in
+acquisition). See section 10 of the notes. Cause not investigated.
