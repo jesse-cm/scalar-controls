@@ -11,16 +11,15 @@ Written 2026-10-24.
 This repository simulates attitude determination and magnetic attitude control
 for SCALAR, the WashU/PROVES 1U CubeSat, in Python on a laptop. The
 determination half (estimators, sensor models, sensor calibration) is the
-older and more settled part; its results are in the
-[README](../README.md#determination-results). The control half (magnetorquer
+older and more settled part; its results are in
+[determination-results.md](determination-results.md). The control half (magnetorquer
 control, tuning, a learned sun-sensor front end, coil identification) is a
 set of dated experiments written up in
 [learned-estimation-and-control.md](learned-estimation-and-control.md), with
 corrections added beside claims that later runs contradicted. All of it is
 simulation: nothing is flight software, nothing has been run on hardware, and
 several inputs are assumed rather than measured (see
-[Open items](#open-items-that-need-hardware-or-a-decision)). Terms are defined
-in the [README](../README.md#words-used-here).
+[Open items](#open-items-that-need-hardware-or-a-decision)).
 
 ## Where things are
 
@@ -115,6 +114,8 @@ it as modified.
 | `learned-estimation-and-control.html` | a one-page formatted version of sections 1 to 5 of the notes as they stood on 2026-09-11. Not updated since; the `.md` is the source |
 | `magnetorquer-defects.md` | what can go wrong with hand-built coils, how big, and what absorbs it |
 | `verification-loop-plan.md` | the plan for checking the notes' conclusions: rules, pass/fail limits, phases |
+| `RESULTS.md` | the results scoreboard: the ledger rows as tables, each against its pass/fail limit. Written by `python3 scripts/report.py --write`; not edited by hand |
+| `determination-results.md` | the determination results (estimator accuracy, estimator comparison, sensor calibration), moved unchanged from the README |
 
 ### Tests: `tests/`
 
@@ -132,30 +133,34 @@ From the repository root:
 pip install -r requirements.txt
 pip install pytest torch
 python3 -m pytest tests -q
+python3 scripts/report.py
 python3 scripts/run_mekf.py
 python3 scripts/lqr_tune.py
 python3 scripts/verify_controller.py results/lqr_tuned_3mode.json
 ```
 
 The first two lines install the packages; `pytest` and `torch` are not in
-`requirements.txt`. The third runs the tests. Then: one determination run, the
+`requirements.txt`. The third runs the tests. The fourth prints the results
+scoreboard: every result row in `results/ledger.csv` as a table, with PASS or
+FAIL against its limit; it runs no simulation, and the test run ends with the
+same printout. Then: one determination run, the
 periodic-LQR demonstration, and the pass/fail check of the tuned controller
 (it exits with status 1 when a limit is missed). What each line needs, the
 rest of the scripts, and which of them were re-run on 2026-10-24 are in the
-[README](../README.md#install-and-run).
+[README](../README.md#1-working-with-the-code).
 
 ## What is established and what is not
 
 Pointers only. The section named owns the claim and its numbers.
 
-Determination, in the README:
+Determination, in [determination-results.md](determination-results.md):
 
 - how well the MEKF knows attitude, with and without the errors that do not
-  average out: [Result](../README.md#result)
+  average out: [Result](determination-results.md#result)
 - how the estimators differ and when it matters:
-  [Estimators](../README.md#estimators--what-the-comparison-shows)
+  [Estimators](determination-results.md#estimators--what-the-comparison-shows)
 - what each calibration method buys:
-  [Sensor calibration](../README.md#sensor-calibration)
+  [Sensor calibration](determination-results.md#sensor-calibration)
 
 Control, learning and identification, in the notes:
 
@@ -194,7 +199,7 @@ Assumed, not known:
 - the hardware list the runs are built on, and what is disputed in it:
   [What the hardware actually is](learned-estimation-and-control.md#what-the-hardware-actually-is)
 - what the simulation leaves out:
-  [README](../README.md#what-is-modelled-and-what-is-not)
+  [README](../README.md#5-limitations)
 
 How the conclusions are meant to be checked:
 [verification-loop-plan.md](verification-loop-plan.md).
