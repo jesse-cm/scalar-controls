@@ -1,0 +1,28 @@
+hand-picked design, seed 0 (70 s): reward +0.77
+   PASS  acq_settle_h        5.343  <= 6.0
+   PASS  acq_diverged        0.000  <= 0.0
+   FAIL  fine_point_mean     8.899  <= 5.0
+   FAIL  fine_point_p95     28.389  <= 15.0
+   PASS  fine_max_rate       0.250  <= 0.5
+   PASS  fine_sat_frac       0.000  <= 0.2
+   PASS  fine_power_w        0.049  <= 0.3
+   PASS  fine_diverged       0.000  <= 0.0
+
+CEM: pop 12, 5 generations, train seeds (0, 1, 2, 3, 4, 5, 6, 7) ...
+gen 0: best +3.02  mean -1.41  mu={'theta_max': 39.587, 'omega_max': 0.232, 'rho': 0.773, 'enter': 0.393, 'exit': 1.224, 'k_damp': 37798.376, 'fine_theta_max': 25.382, 'fine_omega_max': 0.278, 'fine_rho': 0.695}
+gen 1: best +3.07  mean +1.30  mu={'theta_max': 40.039, 'omega_max': 0.186, 'rho': 1.135, 'enter': 0.372, 'exit': 1.225, 'k_damp': 17555.312, 'fine_theta_max': 25.757, 'fine_omega_max': 0.35, 'fine_rho': 0.566}
+gen 2: best +3.01  mean -0.59  mu={'theta_max': 40.783, 'omega_max': 0.216, 'rho': 0.928, 'enter': 0.41, 'exit': 1.232, 'k_damp': 19302.144, 'fine_theta_max': 24.597, 'fine_omega_max': 0.343, 'fine_rho': 0.343}
+gen 3: best +3.06  mean -1.01  mu={'theta_max': 35.647, 'omega_max': 0.24, 'rho': 0.956, 'enter': 0.432, 'exit': 1.255, 'k_damp': 12201.046, 'fine_theta_max': 27.146, 'fine_omega_max': 0.297, 'fine_rho': 0.359}
+gen 4: best +3.09  mean -1.58  mu={'theta_max': 37.773, 'omega_max': 0.262, 'rho': 0.851, 'enter': 0.408, 'exit': 1.261, 'k_damp': 18432.74, 'fine_theta_max': 26.386, 'fine_omega_max': 0.35, 'fine_rho': 0.361}
+
+best params: {'theta_max': 44.8314, 'omega_max': 0.3499, 'rho': 0.9058, 'enter': 0.3482, 'exit': 1.0917, 'k_damp': 13992.3016, 'fine_theta_max': 32.8112, 'fine_omega_max': 0.3174, 'fine_rho': 0.3763}
+   PASS  acq_settle_h        2.938  <= 6.0
+   PASS  acq_diverged        0.000  <= 0.0
+   FAIL  fine_point_mean     5.415  <= 5.0
+   PASS  fine_point_p95     13.215  <= 15.0
+   PASS  fine_max_rate       0.139  <= 0.5
+   PASS  fine_sat_frac       0.000  <= 0.2
+   PASS  fine_power_w        0.052  <= 0.3
+   PASS  fine_diverged       0.000  <= 0.0
+
+saved results/lqr_tuned_ms.json  (100.1 min)
