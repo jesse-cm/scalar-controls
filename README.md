@@ -27,6 +27,15 @@ python3 scripts/matrix.py --list    # the scenarios a simulation run can add row
   of a run with different random noise). Then run `report.py --write` and
   commit both files; a test fails while they disagree. The rules, and the
   commands behind the existing rows: [docs/verification-loop-plan.md](docs/verification-loop-plan.md).
+- **Entering hardware results.** Bench numbers go in `hardware.json` at the
+  repository root, one entry per number: `value` (null if unknown), `units`
+  (fixed; convert the number), `source` and `note`. Source is one of three
+  words: `assumed`, `datasheet`, `measured`. Then run
+  `python3 -m pytest tests/test_hardware.py -q` (checks the file), the as-built
+  rows `python3 scripts/matrix.py --experiments hw --seeds 0-39`, and
+  `report.py --write`. What follows the file: the as-built rows (table G) and
+  the realism scripts (`scripts/*_realism.py`). What stays frozen: experiments
+  1-6 and `--gate`, which never read it.
 - **Other scripts.** Each starts with a comment saying what it tests and how
   to call it. Re-run on 2026-10-24 without error, ten minutes or less each:
   `run_mekf`, `monte_carlo`, `realism_sweep`, `calibration_compare`,
@@ -77,6 +86,8 @@ the same tables saved; the numbers live there, not here.
 | C1, C2 | the controller designs picked by hand in September, with the estimator in the loop and with the true attitude fed in |
 | D | this simulator against Basilisk, one row per compared quantity and run |
 | E | the estimator alone: knowledge error (angle between estimated and true attitude) |
+| G | the tuned controller with the values of `hardware.json` applied, all of them and only the non-assumed ones |
+| H | every entry of `hardware.json`: value, units, source |
 | Not shown | scenarios whose result has no column in the ledger, listed by name |
 
 - Each row gives the typical seed (median across seeds) and the bad seed (95th
@@ -102,11 +113,9 @@ Inputs that come from neither a SCALAR source nor a measurement:
   the comment at the top of `scalar/control/tune.py`).
 - Sensor noise levels: assumed values, not bench measurements
   ([plan, phase 5](docs/verification-loop-plan.md#phase-5--replace-assumed-noise-with-measured-noise-people-not-agents)).
-- The magnetometer's offset drift per kelvin (`ASSUMED_TEMP_COEFF_T_PER_K` in
-  [scripts/mag_realism.py](scripts/mag_realism.py)).
-- The board temperature swing over one orbit (`ASSUMED_TEMP_AMP_K`, same
-  file). Both enter only table B; a temperature-ramp log is to replace them
-  ([plan Status, row 1c](docs/verification-loop-plan.md#2026-10-24--phase-1-row-1c-magnetometer-realism)).
+- Every sensor, coil and body number with its source, including the
+  temperature drift and board temperature swing: [hardware.json](hardware.json)
+  (table H of the scoreboard).
 
 ## 5. Limitations
 

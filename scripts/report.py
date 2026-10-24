@@ -4,8 +4,8 @@
     python3 scripts/report.py            # print the scoreboard
     python3 scripts/report.py --write    # the same, and regenerate docs/RESULTS.md
 
-Reads results/ledger.csv and results/crosscheck_basilisk.json, nothing else.
-Every number printed is computed from those two files at run time. The limits
+Reads results/ledger.csv, results/crosscheck_basilisk.json and hardware.json, nothing else.
+Every number printed is computed from those three files at run time. The limits
 are scalar.control.rl_tune.THRESHOLDS, plus the knowledge limit read from rule
 2 of docs/verification-loop-plan.md. The same text is printed at the end of
 every pytest run (conftest.py at the repository root).
@@ -17,8 +17,10 @@ Where a ledger row goes (``build`` below; ``tests/test_report.py`` holds it to t
     C1, C2   the other closed-loop scenarios of experiments 4 and 5
     E        scenarios with a knowledge error and no controller
     F        any other closed-loop scenario (a name this file has not seen)
+    G        scenario ``hw_acq*`` / ``hw_fine*``: the as-built rows (experiment hw)
     not shown   scenarios whose rows have no number in any ledger column
     D        is not from the ledger: the cross-check JSON
+    H        is not from the ledger: every entry of hardware.json
 
 A new ``+tag`` or a new scenario name needs no change here; ``_FAMILY_WORDS``,
 ``_SCENARIO_WORDS`` and the other word tables only supply nicer labels.
@@ -40,6 +42,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+from scalar import hardware  # noqa: E402
 from scalar.control.rl_tune import THRESHOLDS  # noqa: E402
 from scalar.harness.baseline import baseline_specs  # noqa: E402
 from scalar.harness.ledger import METRIC_COLUMNS, parse_seed_set, read_ledger  # noqa: E402
@@ -47,6 +50,7 @@ from scalar.harness.metrics import pointing_stats  # noqa: E402
 
 LEDGER = os.path.join(ROOT, "results", "ledger.csv")
 CROSSCHECK = os.path.join(ROOT, "results", "crosscheck_basilisk.json")
+HARDWARE = hardware.HARDWARE_JSON
 PLAN = os.path.join(ROOT, "docs", "verification-loop-plan.md")
 RESULTS_MD = os.path.join(ROOT, "docs", "RESULTS.md")
 COMMAND = "python3 scripts/report.py"
@@ -87,6 +91,10 @@ _CONTROLLER_WORDS = {"none": "none", "projected_lqr": "fixed-gain LQR", "periodi
 _MAG_WORDS = {"rawmag": "raw", "calmag": "calibrated"}
 _FAMILY_WORDS = {"mag1c": "magnetometer errors"}
 _SETTING_SUFFIX = (("_uncal", "on"), ("_cal", "on, calibrated"))     # <family>_uncal / <family>_cal
+_VARIANT_WORDS = {"all": "all", "not_assumed": "datasheet+measured"}  # baseline.AS_BUILT_VARIANTS
+_DEVICE_WORDS = {"gyro": "gyro (LSM6DSO)", "magnetometer": "magnetometer (LIS2MDL)",
+                 "sun_sensor": "sun sensor (VEML6031 array)", "board_temperature": "board temperature",
+                 "coils": "magnetic coils", "body": "spacecraft body"}
 
 
 # ------------------------------------------------------------------ the report as data
@@ -437,6 +445,69 @@ def _open_loop_table(rows, know_limit):
     return t
 
 
+def _as_built_table(rows, defs):
+    """G: the hw_* rows, (rows not of the form hw_<acq|fine><n>_<variant> are returned for table F)."""
+    t = Table("G", "As built: the tuned controller with the values of hardware.json",
+              "The three-mode controller of results/lqr_tuned_3mode.json (calibrated magnetometer), with "
+              "the entries of hardware.json applied, the VEML6031 array as the sun sensor, and the plant "
+              "holding the coil dipole over each step with 2 substeps. Values applied: 'all' = every entry "
+              "with a value; 'datasheet+measured' = only entries whose source is not assumed, the rest as "
+              "in experiment 6. Each row is the file as it stood at the row's git hash: after editing "
+              "hardware.json, run `python3 scripts/matrix.py --experiments hw --seeds 0-39`. Lost pointing "
+              f"as in A1; settle time as in A1, PASS = {_g(THRESHOLDS['acq_settle_h'])} h or less "
+              f"(acquisition); mean error as in A2, PASS = {_g(THRESHOLDS['fine_point_mean'])} deg or less "
+              "(fine pointing). Inputs: table H.",
+              ["values\napplied", "episode", "lost\npointing", "mean\nerror,\ntypical", "mean\nerror,\nbad seed",
+               "settle h,\ntypical", "settle h,\nbad seed"], align="llrrrrr", group_name="seeds")
+    left = []
+    for r in rows:
+        m = re.match(r"^hw_(acq|fine)\d+_(.+)$", r["scenario"])
+        if not m:
+            left.append(r)
+            continue
+        episode, variant = m.groups()
+        lost, c0 = _lost_cell(r, "acq_diverged" if episode == "acq" else "fine_diverged")
+        if episode == "acq":
+            mean_t, mean_b, c1, c2 = _deg(r["point_mean__med"]), _deg(r["point_mean__p95"]), None, None
+            set_t, c3 = _limit_cell(r, "acq_settle_h", "med", never="never")
+            set_b, c4 = _limit_cell(r, "acq_settle_h", "p95", never="never")
+        else:
+            mean_t, c1 = _limit_cell(r, "fine_point_mean", "med", _deg)
+            mean_b, c2 = _limit_cell(r, "fine_point_mean", "p95", _deg)
+            set_t, set_b, c3, c4 = _num(r["settle_h__med"], "never"), _num(r["settle_h__p95"], "never"), None, None
+        t.rows.append(Row([_VARIANT_WORDS.get(variant, variant), "acquisition" if episode == "acq" else "fine pointing",
+                           lost, mean_t, mean_b, set_t, set_b], r["scenario"], _seeds_words(r),
+                          _checks(c0, c1, c2, c3, c4), source=r))
+    return t, left
+
+
+def _hw_value(v):
+    if v is None:
+        return "null (not applied)"
+    if isinstance(v, str):
+        return v
+    if isinstance(v, tuple):
+        return "[" + ",".join(_hw_value(x) for x in v) + "]"
+    return f"{v:.4g}"
+
+
+def _hardware_table(path):
+    hw = hardware.load(path)
+    counts = Counter("null" if e.value is None else e.source for e in hw.entries.values())
+    t = Table("H", "Hardware inputs: hardware.json as it stands",
+              "Every entry of hardware.json. Source: assumed = nobody measured it or read it off a datasheet; "
+              "datasheet; measured = a bench result. Null = unknown, not applied: the code's own value "
+              "stands. Read by the as-built rows (table G) and by scripts/gyro_realism.py, mag_realism.py "
+              "and sun_realism.py (in table B: the gyro1h and mag1c rows, and the cube_tilt layout); the other tables never "
+              "read it. Where each number comes from and which bench test replaces it: the entry's note "
+              f"in the file. Now: {len(hw.entries)} entries, " + ", ".join(
+                  f"{counts[k]} {k}" for k in (*hardware.SOURCES, "null")) + ".",
+              ["value", "units", "source"], align="lll", group_name="device", trace_name="hardware.json entry")
+    for e in hw.entries.values():
+        t.rows.append(Row([_hw_value(e.value), e.units, e.source], e.key, _DEVICE_WORDS.get(e.device, e.device)))
+    return t
+
+
 def _gate_rows(node, path=()):
     """(run key, rows) for every dict under ``node`` that holds 'gate_rows_as_is'."""
     if isinstance(node, dict):
@@ -466,7 +537,7 @@ def _crosscheck_table(path):
     return t
 
 
-def build(ledger_path=LEDGER, crosscheck_path=CROSSCHECK, plan_path=PLAN):
+def build(ledger_path=LEDGER, crosscheck_path=CROSSCHECK, plan_path=PLAN, hardware_path=HARDWARE):
     """The whole report as data. Never raises for a missing file; says so in ``problems``."""
     rep = Report()
     know_limit = plan_knowledge_limit(plan_path)
@@ -498,7 +569,8 @@ def build(ledger_path=LEDGER, crosscheck_path=CROSSCHECK, plan_path=PLAN):
         tagged = [r for r in live if "+" in r["scenario"]]
         plain = [r for r in live if "+" not in r["scenario"]]
         tuned_tables, unparsed = _tuned_tables([r for r in plain if r["scenario"].startswith("s6_")], defs)
-        plain = [r for r in plain if not r["scenario"].startswith("s6_")] + unparsed
+        as_built, unparsed_hw = _as_built_table([r for r in plain if r["scenario"].startswith("hw_")], defs)
+        plain = [r for r in plain if not r["scenario"].startswith(("s6_", "hw_"))] + unparsed + unparsed_hw
         experiment = {s.name: s.experiment for s in baseline_specs()}
         closed = [r for r in plain if _is_closed_loop(r)]
         open_loop = [r for r in plain if not _is_closed_loop(r)]
@@ -530,7 +602,10 @@ def build(ledger_path=LEDGER, crosscheck_path=CROSSCHECK, plan_path=PLAN):
             rep.tables.append(_open_loop_table(open_loop, know_limit))
         if other:
             rep.tables.append(_closed_loop_table("F", "Other closed-loop rows", note, other, True))
-
+        if as_built.rows:
+            rep.tables.append(as_built)
+    _add_hardware(rep, hardware_path)
+    if rows is not None:
         for t in rep.tables:
             for row in t.rows:
                 if row.source is not None and not row.reference:
@@ -552,6 +627,14 @@ def build(ledger_path=LEDGER, crosscheck_path=CROSSCHECK, plan_path=PLAN):
         rep.accounting = {"rows": len(rows), **{k: count[k] for k in
                                                ("in_tables", "not_shown", "single_seed", "superseded", "no_number")}}
     return rep
+
+
+def _add_hardware(rep, path):
+    try:
+        rep.tables.append(_hardware_table(path))
+    except (OSError, ValueError) as e:              # HardwareFileError is a ValueError
+        rep.problems.append(f"{os.path.relpath(path, ROOT)} could not be read ({type(e).__name__}: {e}); "
+                            f"no hardware table.")
 
 
 def _add_crosscheck(rep, path):

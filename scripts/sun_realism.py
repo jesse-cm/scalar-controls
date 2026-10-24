@@ -56,7 +56,9 @@ WHERE THE NUMBERS COME FROM
                              2 % of face-on full scale per sample, unit gains
     6.25 ms                  computed below from veml6031.MAX_LUX_G05_PD4
     layouts                  LAYOUTS below; faces 5, 6 on -Z and 7 on +Z as veml6031.py states
-    tilt of "cube_tilt2"     ASSUMED, see ASSUMED_TILT_DEG
+    tilt of "cube_tilt2"     hardware.json, sun_sensor.mounting_tilt_sigma and mounting_tilt_seed (read
+                             through scalar/hardware.py; as shipped "assumed", 2 deg, seed 1). The
+                             layout is named after the tilt, so another value gives another name.
 """
 from __future__ import annotations
 
@@ -68,6 +70,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from scalar import hardware  # noqa: E402
 from scalar.constants import SOLAR_CONSTANT_1AU  # noqa: E402
 from scalar.harness.baseline import baseline_specs, tuned_controller_specs  # noqa: E402
 from scalar.learning.sun_mlp import annual_irradiance_range  # noqa: E402
@@ -84,12 +87,13 @@ def non_clipping_integration_ms():
 
 NON_CLIPPING_MS = non_clipping_integration_ms()  # 6.25 (12.5 ms tops out at 114,083 lx, below face-on sun)
 
-# ASSUMED. 1-sigma mounting tilt of each sensor normal [deg], used only by the "cube_tilt2"
-# layout. No file in this repo gives a mounting tolerance; 2.0 is the default tilt_deg of
-# sun_mlp.flight_like_sensor, and the draw below is that function's (normal + tilt, renormalised).
-# Replaced by the plan's phase-5 rotary-stage sweep of the VEML6031s (measured normals).
-ASSUMED_TILT_DEG = 2.0
-ASSUMED_TILT_SEED = 1       # the unit that is drawn; flight_like_sensor's unit in the notes is seed 1 too
+# 1-sigma mounting tilt of each sensor normal [deg] and the seed of the draw, used only by the
+# "cube_tilt" layout; the draw is sun_mlp.flight_like_sensor's (normal + tilt, renormalised).
+# From hardware.json (sun_sensor.mounting_tilt_sigma, mounting_tilt_seed): see their notes.
+# The ASSUMED_ names are kept for the tests that use them.
+_HW = hardware.load()
+ASSUMED_TILT_DEG = _HW.require("sun_sensor", "mounting_tilt_sigma", "scripts/sun_realism.py")
+ASSUMED_TILT_SEED = _HW.require("sun_sensor", "mounting_tilt_seed", "scripts/sun_realism.py")
 
 _PX, _NX, _PY, _NY, _PZ, _NZ = (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)
 
@@ -121,8 +125,8 @@ LAYOUTS = {
     "side_ring": (_PX, _PY, _NX, _NY, _NZ, _NZ, _PZ),
     # Z faces upside down: 5 and 6 on +Z, 7 on -Z
     "z_flip": (_PX, _NX, _PY, _NY, _PZ, _PZ, _NZ),
-    # the assumed faces, each normal tilted (ASSUMED_TILT_DEG, ASSUMED_TILT_SEED)
-    "cube_tilt2": _as_tuple(_tilted(VEML6031_NORMALS, ASSUMED_TILT_DEG, ASSUMED_TILT_SEED)),
+    # the assumed faces, each normal tilted (ASSUMED_TILT_DEG, ASSUMED_TILT_SEED); "cube_tilt2" as shipped
+    f"cube_tilt{ASSUMED_TILT_DEG:g}": _as_tuple(_tilted(VEML6031_NORMALS, ASSUMED_TILT_DEG, ASSUMED_TILT_SEED)),
 }
 
 MLP_FRONTS = ("mlp_a", "mlp_b")

@@ -53,6 +53,8 @@ class ScenarioSpec:
     inertia: Optional[Tuple[Vec3, Vec3, Vec3]] = None   # None -> RigidBody() default
     inertia_scale: float = 1.0              # true plant only; the design keeps the nominal inertia
     coil_set: str = "s3_on_s6"              # sysid.magnetorquer_id.s3_coil_matrix()
+    coil_matrix: Optional[Tuple[Vec3, Vec3, Vec3]] = None  # closed_loop only: dipole per amp [A m^2/A], column = channel; None -> coil_set's
+    coil_i_max: Optional[Vec3] = None       # closed_loop only: full-scale current per channel [A]; None -> coil_set's
     coil_scale: float = 1.0                 # true plant only (rl_tune.Plant.scale_M)
     m_res: Vec3 = (0.0, 0.0, 0.0)           # residual spacecraft dipole [A m^2]
 
@@ -92,7 +94,11 @@ class ScenarioSpec:
     mag_temp_coeff_T_per_K: Optional[Vec3] = None   # offset drift per axis [T/K]
     mag_temp_amp_K: Optional[float] = None          # half the peak-to-peak board temperature swing, once per orbit [K]
     mag_temp_phase_deg: float = 0.0                 # phase of that swing at t = 0 (0 -> at its mean, warming)
-    sun_unit: str = "ideal"                 # "ideal" | "flight_like" (sun_mlp.flight_like_sensor)
+    # -- board temperature from a log (hardware.json board_temperature.log_csv), in place of the sinusoid,
+    #    for both sensors: ((t [s], ...), (T - T_ref [K], ...)), replayed end to end and repeating
+    #    (period = span + median step). Needs a temperature coefficient and no *_temp_amp_K / *_phase_deg.
+    board_temp_log: Optional[Tuple[Tuple[float, ...], Tuple[float, ...]]] = None
+    sun_unit: str = "ideal"                # "ideal" | "flight_like" (sun_mlp.flight_like_sensor)
     sun_unit_seed: int = 1                  # rng seed that draws the flight-like unit's systematics
     sun_gain_sigma: float = 0.05            # flight_like_sensor arguments
     sun_rolloff: float = 0.2
@@ -107,6 +113,8 @@ class ScenarioSpec:
     veml_integration_ms: Optional[float] = None     # a key of veml6031.MAX_LUX_G05_PD4 (class default 25)
     veml_normals: Optional[Tuple[Vec3, ...]] = None  # physical outward normals of the seven sensors
     veml_clip_mode: Optional[str] = None            # analytic front end only: None | "drop" | "fill"
+    veml_gains: Optional[Tuple[float, ...]] = None  # per-sensor gain, seven values (faces 0,1,2,3,5,6,7)
+    veml_dark_counts: Optional[float] = None        # dark offset [counts]
 
     # ---- estimator ----
     estimator: str = "mekf"                 # "mekf" | "truth" (closed_loop: controller fed the truth)
@@ -222,7 +230,7 @@ class ScenarioSpec:
         if self.sun_front == "none" and self.kind not in ("closed_loop", "estimation"):
             raise ValueError(f"{self.name}: sun_front='none' needs an MEKF run (closed_loop or estimation)")
         if self.sun_array == "cube":
-            need_default("veml_integration_ms", "veml_normals", "veml_clip_mode",
+            need_default("veml_integration_ms", "veml_normals", "veml_clip_mode", "veml_gains", "veml_dark_counts",
                          why="sun_array='cube' is the SunSensorArray; these belong to 'veml6031'")
         else:
             from ..sensors.veml6031 import MAX_LUX_G05_PD4
@@ -238,6 +246,8 @@ class ScenarioSpec:
                 raise ValueError(f"{self.name}: veml_normals must be seven 3-vectors (devicetree faces 0,1,2,3,5,6,7)")
             if self.veml_clip_mode is not None and self.sun_front != "analytic":
                 raise ValueError(f"{self.name}: veml_clip_mode acts in the analytic reconstruction only")
+            if self.veml_gains is not None and len(self.veml_gains) != 7:
+                raise ValueError(f"{self.name}: veml_gains must be seven numbers (devicetree faces 0,1,2,3,5,6,7)")
         one_of("estimator", ("mekf", "truth"))
         one_of("controller", ("none", "projected_lqr", "periodic_lqr", "two_mode", "three_mode"))
         one_of("knowledge_window", ("last_orbit", "after_first_fifth"))
@@ -247,6 +257,12 @@ class ScenarioSpec:
         one_of("plant_hold", ("torque", "dipole"))
         if not isinstance(self.plant_substeps, int) or self.plant_substeps < 1:
             raise ValueError(f"{self.name}: plant_substeps={self.plant_substeps!r} must be an integer >= 1")
+        if self.kind != "closed_loop":
+            need_default("coil_matrix", "coil_i_max", why="only the closed loop builds its coils from the spec")
+        if self.coil_matrix is not None and (len(self.coil_matrix) != 3 or any(len(r) != 3 for r in self.coil_matrix)):
+            raise ValueError(f"{self.name}: coil_matrix must be 3x3")
+        if self.coil_i_max is not None and len(self.coil_i_max) != 3:
+            raise ValueError(f"{self.name}: coil_i_max must be three numbers")
 
         ctrl_fields = ("proj_q_weight", "proj_w_weight", "proj_r_weight", "theta_max_deg",
                        "omega_max_deg_s", "rho", "schedule_bins", "k_damp", "enter_deg_s",
@@ -295,12 +311,26 @@ class ScenarioSpec:
                          "gyro_noise_density", "gyro_bias_rw", "gyro_initial_bias_deg_s",
                          "mag_noise_std", "mag_bias_T", "mag_soft_iron", "mekf_sigma_sun",
                          why="static sun-vector dataset; use dataset_albedo_max")
+        # ---- board temperature from a log (hardware.json), in place of the sinusoids ----
+        log = self.board_temp_log
+        if log is not None:
+            if self.kind not in ("closed_loop", "estimation"):
+                raise ValueError(f"{self.name}: board_temp_log needs the harness Gyro or Magnetometer "
+                                 "(closed_loop or estimation)")
+            need_default("gyro_temp_amp_K", "gyro_temp_phase_deg", "mag_temp_amp_K", "mag_temp_phase_deg",
+                         why="board_temp_log replaces the sinusoid")
+            if self.gyro_temp_coeff_deg_s_per_K is None and self.mag_temp_coeff_T_per_K is None:
+                raise ValueError(f"{self.name}: board_temp_log drives nothing: no temperature coefficient is set")
+            if (len(log) != 2 or len(log[0]) != len(log[1]) or len(log[0]) < 2
+                    or any(b <= a for a, b in zip(log[0], log[0][1:]))):
+                raise ValueError(f"{self.name}: board_temp_log must be (times, temperatures), "
+                                 "two or more of each, times increasing")
         # ---- gyro realism (plan row 1h) ----
         if self.kind not in ("closed_loop", "estimation"):
             need_default("gyro_scale_factor", "gyro_misalign_deg", "gyro_quant_deg_s",
                          "gyro_temp_coeff_deg_s_per_K", "gyro_temp_amp_K", "gyro_temp_phase_deg",
                          why="the harness Gyro is not used by this kind")
-        if (self.gyro_temp_coeff_deg_s_per_K is None) != (self.gyro_temp_amp_K is None):
+        if log is None and (self.gyro_temp_coeff_deg_s_per_K is None) != (self.gyro_temp_amp_K is None):
             raise ValueError(f"{self.name}: gyro_temp_coeff_deg_s_per_K and gyro_temp_amp_K go together")
         if self.gyro_temp_amp_K is None:
             need_default("gyro_temp_phase_deg", why="no temperature drift to phase")
@@ -312,7 +342,7 @@ class ScenarioSpec:
         if self.kind not in ("closed_loop", "estimation"):
             need_default("mag_calibrated", "mag_quant_T", "mag_temp_coeff_T_per_K", "mag_temp_amp_K",
                          "mag_temp_phase_deg", why="the harness Magnetometer is not used by this kind")
-        if (self.mag_temp_coeff_T_per_K is None) != (self.mag_temp_amp_K is None):
+        if log is None and (self.mag_temp_coeff_T_per_K is None) != (self.mag_temp_amp_K is None):
             raise ValueError(f"{self.name}: mag_temp_coeff_T_per_K and mag_temp_amp_K go together")
         if self.mag_temp_amp_K is None:
             need_default("mag_temp_phase_deg", why="no temperature drift to phase")

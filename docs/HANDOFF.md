@@ -20,6 +20,8 @@ corrections added beside claims that later runs contradicted. All of it is
 simulation: nothing is flight software, nothing has been run on hardware, and
 several inputs are assumed rather than measured (see
 [Open items](#open-items-that-need-hardware-or-a-decision)).
+Every hardware number, with its source, and where bench results are typed
+in: [`hardware.json`](../hardware.json) ([README, section 1](../README.md#1-working-with-the-code)).
 
 ## Where things are
 

@@ -1,10 +1,12 @@
-"""Tests: the results scoreboard (scripts/report.py) is built from the ledger and nothing else.
+"""Tests: the results scoreboard (scripts/report.py) is built from the ledger and nothing else
+(plus the cross-check JSON and hardware.json, each for a table of its own).
 
     - it builds from the committed results/ledger.csv and results/crosscheck_basilisk.json
     - every ledger scenario has exactly one home: one table, or the "not shown" list
     - every PASS / FAIL agrees with scalar.control.rl_tune.THRESHOLDS (and, for knowledge, with
       the limit in rule 2 of docs/verification-loop-plan.md), on the value in the ledger
     - a scenario name the report has never seen still shows up
+    - table H is every entry of hardware.json as it stands; table G holds the as-built rows
     - docs/RESULTS.md is what the command writes today
     - the pytest hook in conftest.py prints it and cannot fail a run
 
@@ -59,7 +61,7 @@ def _home_tables(rep, scenario):
 
 def test_builds_from_the_committed_ledger(rep, ledger):
     assert rep.problems == []
-    assert [t.key for t in rep.tables] == ["A1", "A2", "A2b", "B", "C1", "C2", "D", "E"]
+    assert [t.key for t in rep.tables] == ["A1", "A2", "A2b", "B", "C1", "C2", "D", "E", "G", "H"]
     assert all(t.rows and t.note for t in rep.tables)
     a = rep.accounting
     assert a["rows"] == len(ledger)
@@ -210,10 +212,35 @@ def test_a_rerun_replaces_the_earlier_row(tmp_path, ledger):
 
 
 def test_missing_files_do_not_raise(tmp_path):
-    rep2 = report.build(ledger_path=str(tmp_path / "none.csv"), crosscheck_path=str(tmp_path / "none.json"))
-    assert len(rep2.problems) == 2 and rep2.tables == []
+    rep2 = report.build(ledger_path=str(tmp_path / "none.csv"), crosscheck_path=str(tmp_path / "none.json"),
+                        hardware_path=str(tmp_path / "none_hw.json"))
+    assert len(rep2.problems) == 3 and rep2.tables == []
     assert "could not be read" in report.render_terminal(rep2)
     assert "could not be read" in report.render_markdown(rep2)
+
+
+def test_hardware_table_is_every_entry_of_the_file(rep, tmp_path):
+    with open(report.HARDWARE) as f:
+        raw = json.load(f)
+    expected = [(f"{d}.{n}", e["units"], e["source"], e["value"] is None)
+                for d, entries in raw.items() if d != "about" for n, e in entries.items()]
+    got = [(r.scenario, r.cells[1], r.cells[2], r.cells[0].startswith("null")) for r in rep.table("H").rows]
+    assert got == expected and expected
+    assert all(r.source is None and not r.checks for r in rep.table("H").rows)    # not a ledger row
+    bad = tmp_path / "hardware.json"
+    bad.write_text("{")
+    rep2 = report.build(hardware_path=str(bad))
+    assert "H" not in [t.key for t in rep2.tables]
+    assert len(rep2.problems) == 1 and "no hardware table" in rep2.problems[0]
+
+
+def test_as_built_rows_are_table_g(rep, ledger):
+    hw_rows = {r["scenario"] for r in ledger if r["scenario"].startswith("hw_")}
+    assert hw_rows and all(rep.home[s] == "G" for s in hw_rows)
+    for r in rep.table("G").rows:
+        names = {c.limit_name for c in r.checks}
+        episode = "acq" if r.scenario.startswith("hw_acq") else "fine"
+        assert names == ({"acq_diverged", "acq_settle_h"} if episode == "acq" else {"fine_diverged", "fine_point_mean"})
 
 
 def test_results_md_is_what_the_command_writes(rep):
