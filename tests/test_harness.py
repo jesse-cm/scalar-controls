@@ -385,7 +385,7 @@ def test_experiment_6_is_the_tuned_files_and_only_runs_when_asked_for():
     assert baseline_specs(["6"]) == [] and not any("s6_" in k for k in SCRIPT_SEEDS)
     six = select_specs(["6"])
     assert six == tuned_controller_specs() and select_specs(["5", "6"]) == baseline_specs(["5"]) + six
-    assert len({s.key for s in six}) == len(six) == 2 * len(TUNED_FILES) == 8
+    assert len({s.key for s in six}) == len(six) == 2 * len(TUNED_FILES) == 10
     assert {s.experiment for s in six} == {"6"} and all(s.validate() is s for s in six)
 
     # Each file as it says it was produced: its parameters, calibration pass iff it stored a calibration result.
@@ -405,8 +405,18 @@ def test_experiment_6_is_the_tuned_files_and_only_runs_when_asked_for():
                                                          p.get("fine_omega_max", p["omega_max"]),
                                                          p.get("fine_rho", p["rho"]))
     by_file = {stem: six[2 * i] for i, stem in enumerate(TUNED_FILES)}
-    assert [by_file[s].mag_calibrated for s in TUNED_FILES] == [False, False, True, True]
+    assert [by_file[s].mag_calibrated for s in TUNED_FILES] == [False, False, True, True, True]
     assert by_file["lqr_tuned2"].controller_label == by_file["lqr_tuned_cal"].controller_label   # same parameters
+
+    # Experiment 6L: the acquisition episode of two files at 6 orbits, under its own id and scenario names.
+    from scalar.harness.baseline import LONG_ACQ_FILES, long_acquisition_specs
+    long = select_specs(["6L"])
+    assert long == long_acquisition_specs() and select_specs(["6", "6L"]) == six + long
+    assert LONG_ACQ_FILES == ("lqr_tuned_3mode", "lqr_tuned_ms") and len(long) == len(LONG_ACQ_FILES)
+    for stem, s in zip(LONG_ACQ_FILES, long):
+        assert s.validate() is s and s.experiment == "6L" and s.name == "s6_acq120x6orb_calmag_" + stem
+        assert s == by_file[stem].replace(experiment="6L", name=s.name, n_orbits=6)   # nothing else differs
+    assert not {s.key for s in long} & {s.key for s in six}
 
     # A six-parameter file without the calibration pass equals rl_tune.evaluate (the nine-parameter,
     # calibrated case is test_three_mode_specs_equal_rl_tune_evaluate).
@@ -432,7 +442,9 @@ def test_experiment_6_is_the_tuned_files_and_only_runs_when_asked_for():
         return buf.getvalue().splitlines()
 
     assert listed()[-1] == "62 scenarios" and not any("s6_" in line for line in listed())
-    assert listed("--experiments", "6")[-1] == "8 scenarios"
+    assert listed("--experiments", "6")[-1] == "10 scenarios"
+    assert listed("--experiments", "6L")[-1] == "2 scenarios"
+    assert not any("x6orb" in line for line in listed("--experiments", "6"))
     assert listed("--experiments", "6", "--match", "s6_fine20_*_lqr_tuned_3mode |*")[-1] == "1 scenarios"
     with contextlib.redirect_stderr(io.StringIO()):
         try:

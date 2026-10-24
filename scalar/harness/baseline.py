@@ -30,13 +30,19 @@ from .spec import ScenarioSpec
 
 __all__ = ["SEEDS", "PLAN_GATE_SEED", "DocCheck", "baseline_specs", "SCRIPT_SEEDS", "DOC_CHECKS",
            "projected_weight_draws", "rl_tune_specs", "TUNED_FILES", "tuned_controller_specs",
-           "select_specs"]
+           "LONG_ACQ_FILES", "LONG_ACQ_ORBITS", "long_acquisition_specs", "select_specs"]
 
 SEEDS = tuple(range(40))        # rule 4 of the verification-loop plan
 PLAN_GATE_SEED = 2              # the seed the plan's gate assumes
 
 # Experiment 6: the tuner outputs of sections 6-7 of the notes, in the order they were produced.
-TUNED_FILES = ("lqr_tuned", "lqr_tuned2", "lqr_tuned_cal", "lqr_tuned_3mode")
+TUNED_FILES = ("lqr_tuned", "lqr_tuned2", "lqr_tuned_cal", "lqr_tuned_3mode", "lqr_tuned_ms")
+# Experiment 6L: the acquisition episode of these files run for 6 orbits instead of 4. In the 4-orbit
+# episode (6.38 h) the last orbit starts at 4.78 h, before the 6 h settle limit, so "diverged" (pointing
+# above 90 deg in the last orbit) cannot tell slow acquisition from lost pointing; at 6 orbits (9.57 h)
+# the last orbit starts at 7.97 h.
+LONG_ACQ_FILES = ("lqr_tuned_3mode", "lqr_tuned_ms")
+LONG_ACQ_ORBITS = 6
 _RESULTS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "results")
 
 _EPOCH_2024 = (2024, 3, 20, 12, 0, 0)       # Scenario() default epoch; jd 2460390.0
@@ -293,12 +299,36 @@ def tuned_controller_specs(files=TUNED_FILES, results_dir=_RESULTS):
     return specs
 
 
-def select_specs(experiments=None):
-    """baseline_specs(experiments), followed by tuned_controller_specs() when id '6' is asked for.
+def long_acquisition_specs(files=LONG_ACQ_FILES, n_orbits=LONG_ACQ_ORBITS, results_dir=_RESULTS):
+    """Experiment 6L: the acquisition episode of experiment 6 with a longer run, one spec per file.
 
-    ``None`` is the baseline only (experiments 1-5); experiment 6 is never selected by default.
+    Same parameters, plant and calibration rule as ``tuned_controller_specs``; only ``n_orbits``
+    differs, and the name says so (``s6_acq120x6orb_<rawmag|calmag>_<file>``) so the rows cannot be
+    read as the 4-orbit ``s6_acq120_*`` rows. The settle time is still measured from the start of
+    the run; "diverged" and the pointing mean still look at the last orbit, which is now later.
+
+    Not a baseline: no doc check, no script seed; do not run it with ``--gate``.
+    """
+    from ..control.rl_tune import load_params
+    specs = []
+    for stem in files:
+        params, meta = load_params(os.path.join(results_dir, stem + ".json"))
+        cal = "cal_dir_err_med" in meta["train_metrics"]
+        acq, _ = rl_tune_specs(params, mag_calibrated=cal, n_orbits_acq=n_orbits)
+        specs.append(acq.replace(experiment="6L",
+                                 name=f"s6_acq120x{n_orbits:g}orb_{'calmag' if cal else 'rawmag'}_{stem}"))
+    return specs
+
+
+def select_specs(experiments=None):
+    """baseline_specs(experiments), then tuned_controller_specs() for id '6', long_acquisition_specs() for '6L'.
+
+    ``None`` is the baseline only (experiments 1-5); experiments 6 and 6L are never selected by default.
     """
     specs = baseline_specs(experiments)
-    if experiments is not None and "6" in {str(e) for e in experiments}:
+    want = set() if experiments is None else {str(e) for e in experiments}
+    if "6" in want:
         specs += tuned_controller_specs()
+    if "6L" in want:
+        specs += long_acquisition_specs()
     return specs
