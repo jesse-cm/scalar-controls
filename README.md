@@ -1,14 +1,185 @@
-# SCALAR — CubeSat Attitude-Determination Simulation
+# SCALAR attitude determination and control simulation
 
-A Python simulation of **3D attitude determination** for the WashU/PROVES 1U
-CubeSat (SCALAR). A freely tumbling spacecraft is observed through a realistic
-sensor suite (gyro + magnetometer + coarse sun sensors) and its attitude is
-reconstructed by a **Multiplicative Extended Kalman Filter (MEKF)**, then
-benchmarked against a 10–15° attitude-knowledge budget.
+This repository is a Python simulation of two jobs for SCALAR, the
+WashU/PROVES 1U CubeSat:
 
-Determination only — **no control, no actuator, no detumble** (descoped).
+1. **working out which way the spacecraft is pointing**, from its gyro,
+   magnetometer and sun sensors, and
+2. **turning it** with magnetic coils, using that estimate.
 
-## Result
+Everything runs on a laptop. It is a study tool. None of it is flight software
+and none of it has been checked against hardware.
+
+**Picking this up for the first time? Read [docs/HANDOFF.md](docs/HANDOFF.md)
+first.** It is the map: where each piece of code, each result file and each
+open question lives.
+
+## Words used here
+
+- **Attitude**: the orientation of the spacecraft body relative to the stars.
+- **Attitude determination**: estimating the attitude from sensor readings.
+  The **knowledge error** is the angle between the estimated and the true
+  attitude.
+- **Attitude control**: turning the spacecraft to a wanted attitude. The
+  **pointing error** is the angle between the true attitude and the target.
+- **Truth**: the simulated real world (true attitude, true magnetic field).
+  The estimator never sees it; it only sees simulated sensor readings.
+- **Gyro**: measures how fast the body is rotating. Its reading has a slowly
+  drifting offset, the **gyro bias**.
+- **Magnetometer**: measures the direction and strength of Earth's magnetic
+  field in the body frame.
+- **Sun sensor**: light sensors on the faces; comparing them gives the
+  direction to the Sun. It gives nothing in **eclipse** (Earth's shadow), and
+  sunlight reflected off Earth (**albedo**) pulls its answer toward Earth.
+- **TRIAD**: a formula that gives attitude from two measured directions (Sun
+  and magnetic field) at one instant, with no memory.
+- **MEKF** (multiplicative extended Kalman filter): the main estimator. It
+  keeps a running attitude estimate, pushes it forward with the gyro, and
+  corrects it with the magnetometer and sun sensor. It also estimates the
+  gyro bias. **IMEKF** is the same filter repeating its correction step a few
+  times; **USQUE** is a different filter of the same family (an unscented
+  Kalman filter).
+- **IGRF**: the standard published model of Earth's magnetic field. A
+  **dipole** is the simple bar-magnet approximation of it.
+- **Magnetorquer**: a coil (or a rod with a coil around it) that acts as an
+  electromagnet. Earth's field pushes on it and turns the spacecraft. It can
+  never push around the field direction itself, only across it.
+- **Detumble**: slowing an unwanted spin.
+- **LQR** (linear quadratic regulator): a standard recipe that turns "how much
+  do I care about error versus actuator effort" into feedback gains.
+  **Periodic LQR** computes a different gain for each point around the orbit,
+  because the magnetic field direction changes around the orbit. **LQI** adds
+  a term that accumulates past error.
+- **System identification**: working out a property of the hardware (here, how
+  strong each coil is and which way it points) from recorded motion.
+- **Monte Carlo**: repeating a run many times with different random numbers
+  (**seeds**) and reporting the spread, not one lucky run.
+
+## What is in the repository
+
+| Part | What it does | Code | Where its results are |
+|---|---|---|---|
+| Simulated world | orbit, Sun and eclipse, Earth's magnetic field (dipole and IGRF), how a rigid body rotates | `scalar/environment/`, `scalar/dynamics.py`, `scalar/attitude.py` | — |
+| Sensors | gyro, magnetometer, sun sensor (a generic six-face one and a model of the VEML6031 light sensors), star tracker | `scalar/sensors/` | — |
+| Determination | TRIAD, MEKF and IMEKF, USQUE, and a TRIAD-only baseline, compared by Monte Carlo | `scalar/estimator/`, `scalar/scenario.py`, `scalar/montecarlo.py` | [Determination results](#determination-results) below |
+| Sensor calibration | three ways of measuring and removing magnetometer and sun-sensor errors | `scalar/calibration/` | [Sensor calibration](#sensor-calibration) below |
+| Actuators and control | magnetorquer model; fixed-gain LQR, periodic LQR with a mode switch, LQI | `scalar/actuators/`, `scalar/control/` | [notes §4](docs/learned-estimation-and-control.md#4-lqr-parameters-that-point), [§10](docs/learned-estimation-and-control.md#10-lqi-in-fine-mode-tested-it-does-not-cancel-the-rate-path-2026-10-24) |
+| Tuning and verification | automatic search for controller settings against fixed pass/fail limits, then a separate check on seeds the search never saw | `scalar/control/rl_tune.py`, `scripts/rl_tune_lqr.py`, `scripts/verify_controller.py` | [notes §6](docs/learned-estimation-and-control.md#6-tuning-by-reward-verifying-by-criteria-added-2026-09-12), [§7](docs/learned-estimation-and-control.md#7-magnetometer-calibration-in-the-loop-added-2026-09-13) |
+| Learned sun-sensor front end | a small neural network that turns raw sun-sensor readings into a Sun direction | `scalar/learning/` | [notes §1](docs/learned-estimation-and-control.md#1-a-neural-network-for-state-estimation--where-it-actually-helps), [§5](docs/learned-estimation-and-control.md#5-the-whole-chain-nn---mekf---periodic-lqr) |
+| Magnetorquer identification | recovers coil strength and direction from recorded torque pulses | `scalar/sysid/` | [notes §3](docs/learned-estimation-and-control.md#3-learning-the-magnetorquer-configuration) |
+| Error studies | scripts that take the pointing error apart and try fixes | `scripts/` | [notes §8](docs/learned-estimation-and-control.md#8-ablation-and-mechanism-2026-09-13-two-opus-agents-scriptsablation_pointingpy-scriptsmechanism_gyro_biaspy) to [§12](docs/learned-estimation-and-control.md#12-the-real-sun-sensor-veml6031-counts-and-saturation-2026-10-24) |
+
+"Notes" means [docs/learned-estimation-and-control.md](docs/learned-estimation-and-control.md). The file-by-file
+map, including every script and every result file, is in
+[docs/HANDOFF.md](docs/HANDOFF.md#where-things-are).
+
+## Install and run
+
+Needs Python 3 (checked with Python 3.13). Run everything from the repository
+root.
+
+```bash
+pip install -r requirements.txt     # numpy, scipy, matplotlib, ppigrf
+pip install pytest torch            # not in requirements.txt; see below
+python3 -m pytest tests -q          # the test suite
+```
+
+- The tests need `ppigrf` (the package that supplies the IGRF field). It is in
+  `requirements.txt`. Without it the tests in `tests/test_igrf.py` and
+  `tests/test_calibration_compare.py` fail.
+- `pytest` runs the tests. `torch` is needed only by
+  `scalar/learning/sun_mlp.py`: the two tests in `tests/test_sun_mlp.py` and
+  the scripts that train the network.
+- Use pytest. Running a test file directly (`python3 tests/<file>.py`) does
+  not work for every file.
+
+Scripts that finish in seconds to about ten minutes:
+
+```bash
+# determination
+python3 scripts/run_mekf.py                 # one orbit through the MEKF, prints the knowledge error
+python3 scripts/monte_carlo.py 40           # estimator comparison over 40 random runs
+python3 scripts/realism_sweep.py 40         # the same with albedo and field-model error switched on
+python3 scripts/calibration_compare.py 12   # the three calibration methods compared
+
+# control, learning, identification
+python3 scripts/detumble_lqr.py             # fixed-gain LQR slowing a tumble
+python3 scripts/lqr_tune.py                 # periodic LQR: near-target pointing, then acquisition from a large error
+python3 scripts/verify_controller.py results/lqr_tuned_3mode.json   # pass/fail table for a tuned controller
+python3 scripts/nn_sun_sensor.py            # trains the sun-sensor network and compares it (needs torch)
+python3 scripts/sysid_magnetorquer.py       # coil identification from torque pulses
+python3 scripts/closed_loop_nn.py           # network -> MEKF -> periodic LQR in one loop (needs torch)
+python3 scripts/absolute_without_gps.py     # how wrong the position and clock may be
+```
+
+`verify_controller.py` exits with status 1 when any limit is missed; that is
+its report, not a crash.
+
+Every command above was run on 2026-10-24 with Python 3.13 and finished
+without error (`verify_controller.py` with status 1, as just described). Two
+things to know about that check:
+
+- The two `pip` lines found every package already installed, so they did not
+  test an install from nothing.
+- The scripts were run in a copy of the repository, so that the plots and
+  result files kept in git were not overwritten.
+
+Time each one took, on a laptop that was busy with other work: `run_mekf` 3 s,
+`monte_carlo 40` 9 min, `realism_sweep 40` 4 min, `calibration_compare 12`
+1 min, `detumble_lqr` 2 s, `lqr_tune` 3 min, `verify_controller` 2 min,
+`nn_sun_sensor` 24 s, `sysid_magnetorquer` 1 min, `closed_loop_nn` 3 min,
+`absolute_without_gps` 8 s.
+
+The remaining scripts each run many closed-loop simulations on several
+processor cores and overwrite a file in `results/`. They were not re-run for
+this README; the result files in the repository are from the dates given in
+the notes:
+
+```bash
+python3 scripts/rl_tune_lqr.py              # not run
+python3 scripts/ablation_pointing.py        # not run
+python3 scripts/lqi_fine.py                 # not run
+python3 scripts/estimator_levers.py         # not run
+python3 scripts/veml6031_baseline.py        # not run
+```
+
+Each script starts with a comment block saying what it tests and how to call
+it.
+
+## Where results live
+
+- **Determination and calibration results**: the tables in this README,
+  below. The scripts that produce them print their numbers to the screen and
+  save plots to `outputs/`.
+- **Control, learning and identification results**: the notes,
+  [docs/learned-estimation-and-control.md](docs/learned-estimation-and-control.md). They are dated, and
+  where a later run contradicted an earlier claim the correction sits beside
+  the original text.
+- **`results/`**: files written by the tuning and study scripts: tuned
+  controller settings, the tuner's logs, and tables of per-run numbers.
+  Sections 10 to 12 of the notes name the file and the entry behind each of
+  their numbers; the earlier sections name the script.
+- **`outputs/`**: plots, and the network weights exported as a C header. Git
+  ignores new files here, and new `.png` and `.csv` files anywhere
+  (`.gitignore`); the ones in the repository were added on purpose. Re-running
+  a script overwrites the plot of the same name, and git then shows that file
+  as modified.
+- **Which script wrote which file**:
+  [docs/HANDOFF.md](docs/HANDOFF.md#where-things-are).
+
+## Determination results
+
+The three subsections below are the determination results as written when
+that half of the work was done. Their text and tables are unchanged.
+
+The tables have not been regenerated since. On 2026-10-24 the three scripts
+behind them were run again. `scripts/calibration_compare.py 12` printed the
+calibration table again except for the last digit of two entries.
+`scripts/monte_carlo.py 40` and `scripts/realism_sweep.py 40` printed values
+close to the two tables under Result but not identical to them. Treat the
+tables as a record of the earlier runs until someone regenerates them.
+
+### Result
 
 Reported two ways, because they answer different questions.
 
@@ -50,7 +221,7 @@ tumbling fast enough (≳2°/s) for the magnetometer to be observable about all
 axes. (A second — coarse-dt divergence — was traced to the first-order
 covariance transition and fixed; see below.)
 
-## Estimators & what the comparison shows
+### Estimators & what the comparison shows
 
 Five estimators (`scalar/estimator/`, compared in `scripts/monte_carlo.py`):
 **MEKF** (multiplicative EKF, exact covariance transition), **IMEKF** (same, with
@@ -90,7 +261,7 @@ is a free must-have; for steady-state ops the plain MEKF suffices; if the bus ca
 start from an unknown tumbling attitude, **the iterated MEKF is the best and
 cheapest choice** (USQUE second). No estimator beats the systematic-error floor.
 
-## Sensor calibration
+### Sensor calibration
 
 The field is now the **real IGRF** (via `ppigrf`), not a dipole stand-in, so
 the estimator can carry IGRF as its onboard reference and the residual attitude
@@ -125,86 +296,86 @@ Key findings:
   orbit** (18–46 µT over one LEO pass); a constant-field Helmholtz-cage sweep is
   rank-degenerate and cannot solve the 9-parameter fit.
 
-## Quick start
+## Control and learning results
 
-```bash
-pip install -r requirements.txt          # numpy, scipy, matplotlib, ppigrf
-python3 scripts/run_mekf.py              # one orbit + error plot -> outputs/
-python3 scripts/monte_carlo.py 40        # estimator comparison -> outputs/
-python3 scripts/realism_sweep.py 40      # expected accuracy vs systematic error
-python3 scripts/calibration_compare.py 12  # calibration-technique comparison -> outputs/
-for f in tests/test_*.py; do python3 "$f"; done   # 110 tests
-```
+These are not summarised here, so that each number has one home. Read the
+notes, [docs/learned-estimation-and-control.md](docs/learned-estimation-and-control.md); a list of
+what they establish and what they do not, section by section, is in
+[docs/HANDOFF.md](docs/HANDOFF.md#what-is-established-and-what-is-not).
 
-## Layout
-
-```
-scalar/
-  attitude.py         frame + quaternion conventions (q_{B<-I}, Hamilton scalar-last)
-  constants.py        physical constants, SI unit conventions
-  timeutil.py         Julian Date, GMST
-  dynamics.py         torque-free rigid-body tumble (Euler + exp-map quaternion)
-  scenario.py         assembles truth + environment + sensors into one SimResult
-  environment/
-    sun.py            ECI sun vector, irradiance, cylindrical eclipse
-    orbit.py          550 km / 51.6° circular LEO with J2 secular precession
-    magfield.py       tilted rotating dipole (estimator reference model)
-    igrf.py           real IGRF-13/14 field (ppigrf), vectorised ECI batch
-  sensors/
-    gyro.py           LSM6DSO: ARW noise + random-walk bias
-    magnetometer.py   LIS2MDL: body-frame field + noise + soft/hard iron
-    sun_sensor.py     6-face photodiodes + per-diode gain, FOV roll-off, misalignment
-    star_tracker.py   camera: absolute quaternion, anisotropic noise, keep-out gating
-  estimator/
-    triad.py          deterministic two-vector attitude (init)
-    mekf.py           the MEKF (state [dtheta, gyro-bias], vector + attitude updates)
-    algebraic.py      TRIAD-only baseline
-  calibration/
-    mag_onorbit.py    attitude-independent ellipsoid fit (|B_IGRF| scalar reference)
-    sun_onground.py   pre-flight sun-sensor response-curve calibration
-    startracker_ref.py  star-tracker-referenced full soft-iron + bias recovery
-  montecarlo.py       randomized multi-run comparison harness
-scripts/              runnable demos (incl. calibration_compare.py)
-tests/                110 physics-validated tests
-```
+The short version, without numbers: slowing a tumble works; holding a target
+attitude works when the controller is told the true attitude; with the
+estimator in the loop and realistic sensor errors the fine-pointing limit set
+for these studies is missed on most seeds, and the fixes tried so far have not
+closed the gap.
 
 ## Conventions
 
-- Attitude quaternion `q` is Hamilton, **scalar-last** `[x,y,z,w]` (matches
-  `scipy`), representing `q_{B<-I}`: `v_body = C(q) v_eci`.
-- Strict SI; angles in radians unless a name ends in `_deg`.
-- Time carried as Julian Date (astronomy) and seconds-from-epoch (propagation).
+- The attitude quaternion `q` is Hamilton, **scalar-last** `[x, y, z, w]`
+  (the same layout as `scipy`). It takes a vector from the inertial frame to
+  the body frame: `v_body = C(q) v_eci`. `scalar/attitude.py` is the one place
+  this is defined.
+- `attitude_error_rotvec(q, target)` shrinks at the body rate: its time
+  derivative is minus the angular velocity. A controller that feeds it back
+  must negate it. Two tests pin this: `test_error_vector_derivative_sign` in
+  `tests/test_periodic_lqr.py` and `test_attitude_feedback_is_restoring` in
+  `tests/test_control.py`.
+- SI units throughout; angles are in radians unless a name ends in `_deg`.
+- Time is carried as Julian Date for astronomy and as seconds from the start
+  for propagation.
 
-## Modeling scope & honest limitations
+## What is modelled and what is not
 
-Real hardware is modeled where it drives the estimator: **LSM6DSO** gyro,
-**LIS2MDL** magnetometer (both confirmed against the PROVES FC_V5d schematics),
-face-board CMOS photodiodes (part unconfirmed — generic model). The two dominant
-systematic errors are modeled but **off by default**, so the default run is the
-clean validation baseline:
+Modelled:
 
-- **Earth albedo** on the sun sensor (`albedo_coeff`) — reflected light from
-  nadir biases the reconstructed sun vector; the dominant sunlit error in orbit.
-- **Field-model error** — selectable truth field: the tilted centered dipole with
-  an optional synthetic direction offset (`field_model_error_deg`), or the **real
-  IGRF** (`field_truth="igrf"`). With IGRF truth, the dipole-vs-real discrepancy
-  is physical (~10° median direction error); pointing the estimator's reference
-  at the same IGRF removes it and exposes the sensor-calibration floor.
+- **Orbit**: a circular low Earth orbit whose plane drifts slowly because
+  Earth is not a perfect sphere (the J2 effect). The defaults are in
+  `scalar/environment/orbit.py`.
+- **Sun**: direction, brightness and eclipse.
+- **Magnetic field**: the dipole approximation, and the real IGRF field
+  through `ppigrf`.
+- **Rotation**: rigid-body motion, free or with an applied torque.
+- **Gyro** (LSM6DSO): noise and a wandering bias.
+- **Magnetometer** (LIS2MDL): noise, plus the constant offset and distortion
+  that nearby metal causes (hard and soft iron).
+- **Sun sensor**: by default a generic sensor with one light detector on each
+  of six faces, with per-detector gain, cover-glass roll-off and tilt errors.
+  `scalar/sensors/veml6031.py` models the seven VEML6031 light sensors the
+  notes list for SCALAR, including the point where they saturate.
+- **Star tracker**: a camera that returns attitude directly. It is here for
+  the calibration comparison; the notes list no star tracker on the
+  spacecraft.
+- **Two errors that do not average out**, both off by default so that the
+  default run is the clean baseline: Earth albedo on the sun sensor, and a
+  mismatch between the true field and the field model the estimator uses.
+- **Magnetorquers**: each one a magnetic dipole along a fixed axis with a
+  maximum strength; torque is dipole cross field. The control studies add a
+  constant leftover magnetic dipole of the spacecraft itself.
+- **The control loop** as the flight computer could run it: the controller
+  sees only the estimator's output, once per second.
 
-Now modeled (previously limitations): the **real IGRF** field (`ppigrf`);
-**J2 secular precession** of the orbit (node regresses −4.6°/day at 550 km /
-51.6°); sun-sensor **cover-glass FOV roll-off**, **per-diode gain mismatch** and
-**normal misalignment**; magnetometer **soft- and hard-iron** distortion; a
-**star-tracker** sensor with anisotropic noise and Sun/Earth keep-out gating; and
-on-orbit / on-ground / star-tracker-referenced **sensor calibration**.
+Simplified or left out:
 
-Still simplified / omitted: sun ephemeris uses the ~0.01° analytic series taken
-directly as ECI; orbit is circular (J2 secular rates applied, no drag or higher
-zonal harmonics).
+- The Sun's position comes from a short analytic formula used directly in the
+  inertial frame. The orbit is circular, with no air drag and no gravity terms
+  beyond J2.
+- No disturbance torques from gravity gradient, air drag or sunlight pressure.
+- The control studies use the dipole field for both the truth and the
+  controller's model.
+- The magnetic field of the coils at the magnetometer is not modelled in
+  `scalar/`. One script, `scripts/estimator_levers.py`, adds a
+  measure-then-torque cycle. [docs/magnetorquer-defects.md](docs/magnetorquer-defects.md)
+  lists this and the other ways hand-built coils can misbehave.
+- No coil electrical behaviour and no temperature effects.
 
-With systematics off (default) the estimator shares the truth's environment
-models, so only sensor noise drives the error — the sub-degree validation
-baseline. Turning them on (truth ≠ model) gives the realistic ~5–9° estimate and
-is what the 10–15° budget's headroom is for. **Not reference-derived** (my
-assumptions): orbit 550 km / 51.6°, 1U inertia, and the ideal 6-face sun-sensor
-placement.
+Assumed, not taken from a SCALAR source:
+
+- the default orbit, the 1U inertia, and which way each sun-sensor face points
+  ([notes §9](docs/learned-estimation-and-control.md#9-the-sun-sensor-geometry-is-assumed-not-known-2026-09-13));
+- the coil set: `scripts/detumble_lqr.py` uses two rods and one flat coil, the
+  later control studies use a different three-coil set, and neither is
+  confirmed by a source
+  ([notes, hardware section](docs/learned-estimation-and-control.md#what-the-hardware-actually-is);
+  the comment at the top of `scalar/control/tune.py`);
+- sensor noise levels are assumed values, not bench measurements
+  ([verification plan, phase 5](docs/verification-loop-plan.md#phase-5--replace-assumed-noise-with-measured-noise-people-not-agents)).

@@ -1,17 +1,22 @@
-"""Rigid-body attitude dynamics for a freely tumbling CubeSat.
+"""Rigid-body attitude dynamics for a CubeSat: free tumble and applied torque.
 
-Determination-only sim: there is **no control torque and no actuator**. The
-spacecraft tumbles under torque-free rigid-body dynamics (Euler's equation),
-which is the truth the estimator must track.
+Two integrators share one rigid body (Euler's equation):
 
-    Euler:       I omega_dot = -omega x (I omega)        (tau = 0)
+  * ``simulate_free_tumble`` - no torque. This is the truth the estimator
+    must track in the determination runs.
+  * ``simulate_controlled`` - a body torque from a callback each step
+    (zero-order hold), used by the magnetorquer control code in
+    ``scalar.control``. The actuator model itself is in ``scalar.actuators``.
+
+    Euler:       I omega_dot = tau - omega x (I omega)   (tau = 0 in free tumble)
     Kinematics:  q_{B<-I} advanced by the attitude exponential map.
 
-Angular velocity obeys a q-independent ODE (torque-free), so we RK4-integrate
-omega on its own and advance the quaternion with the validated
-``attitude.propagate`` using the step-averaged rate. Correctness is checked by
-the two torque-free invariants: rotational kinetic energy and the inertial
-angular-momentum vector are both conserved.
+In free tumble the angular velocity obeys a q-independent ODE, so we
+RK4-integrate omega on its own and advance the quaternion with the validated
+``attitude.propagate`` using the step-averaged rate. The controlled integrator
+uses the same scheme with the torque held over the step. Correctness of the
+free-tumble case is checked by the two torque-free invariants: rotational
+kinetic energy and the inertial angular-momentum vector are both conserved.
 """
 from __future__ import annotations
 
@@ -39,7 +44,7 @@ def default_inertia(mass=1.3, side=0.1, asymmetry=(0.9, 1.0, 1.15)):
 
 @dataclass
 class RigidBody:
-    """Torque-free rigid body with a (generally full) inertia tensor."""
+    """Rigid body with a (generally full) inertia tensor; torque is optional."""
 
     inertia: np.ndarray = None  # 3x3 [kg m^2]
 
@@ -70,7 +75,7 @@ class RigidBody:
 
 @dataclass
 class TruthTimeline:
-    """Truth attitude/rate history from a free-tumble run."""
+    """Truth attitude/rate history from a free-tumble or controlled run."""
 
     t: np.ndarray            # (N,)   time from epoch [s]
     q: np.ndarray            # (N, 4) attitude q_{B<-I}, scalar-last
