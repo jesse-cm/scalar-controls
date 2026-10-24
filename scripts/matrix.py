@@ -6,6 +6,11 @@
     python3 scripts/matrix.py --seeds 0-39                 # baseline, experiments 1-5, 40 seeds
     python3 scripts/matrix.py --experiments 5 --seeds 0-39 --workers 8
     python3 scripts/matrix.py --match 'e4D*' --seeds 0-7 --no-ledger
+    python3 scripts/matrix.py --experiments 6 --seeds 0-39 # the tuned controllers of results/lqr_tuned*.json
+
+Experiment 6 (each results/lqr_tuned*.json as the acquisition and the
+fine-pointing episode of rl_tune.evaluate) runs only when asked for by id; it
+has no number in the --gate table and --gate refuses it.
 
 Rows go to results/ledger.csv (appended; the file is created with the fixed
 header). One row per (scenario, estimator, controller, seed-set, git hash,
@@ -32,8 +37,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scalar.harness import (FIXED_METRICS, append_rows, baseline_specs, ledger_row,  # noqa: E402
-                            run_cases)
+from scalar.harness import FIXED_METRICS, append_rows, ledger_row, run_cases  # noqa: E402
+from scalar.harness.baseline import select_specs  # noqa: E402
 from scalar.harness.gate import format_gate, gate_seeds, gate_table  # noqa: E402
 from scalar.harness.ledger import current_git_hash, parse_seed_set  # noqa: E402
 from scalar.harness.runner import stderr_progress  # noqa: E402
@@ -55,7 +60,7 @@ def write_per_seed(path, specs, cases):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--experiments", default="1,2,3,4,5", help="comma list of experiment ids (default all five)")
+    ap.add_argument("--experiments", default="1,2,3,4,5", help="comma list of experiment ids (default the baseline, 1-5; 6 = tuned controllers)")
     ap.add_argument("--match", default=None, help="glob on 'scenario | estimator | controller'")
     ap.add_argument("--seeds", default=None, help="seed set, e.g. 0-39 or 2 or 100,101,102")
     ap.add_argument("--gate", action="store_true", help="compare against the doc at seed 2 and the scripts' seeds")
@@ -66,7 +71,10 @@ def main(argv=None):
     ap.add_argument("--per-seed", default=None, metavar="PATH", help="also write per-seed results as CSV")
     a = ap.parse_args(argv)
 
-    specs = baseline_specs(a.experiments.split(","))
+    experiments = [e.strip() for e in a.experiments.split(",")]
+    if a.gate and "6" in experiments:
+        ap.error("--gate compares experiments 1-5 against the doc; experiment 6 has no gate numbers")
+    specs = select_specs(experiments)
     if a.match:
         specs = [s for s in specs if fnmatch.fnmatch(s.key, a.match)]
     if not specs:

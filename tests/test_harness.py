@@ -370,6 +370,78 @@ def test_baseline_mirrors_the_five_scripts():
     assert g[_spec("e3_pulse2s_10Hz_n90").key] == [1, 2, 190] and g[_spec("e4D_acq120_mekf").key] == [2]
 
 
+def test_experiment_6_is_the_tuned_files_and_only_runs_when_asked_for():
+    import contextlib
+    import importlib.util
+    import io
+    import json
+    from scalar.control.rl_tune import default_plant, evaluate, load_params
+    from scalar.harness.baseline import TUNED_FILES, select_specs, tuned_controller_specs
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    # Not in the default selection: the baseline and the gate see the same 62 scenarios as before.
+    assert [s.key for s in select_specs()] == [s.key for s in baseline_specs()]
+    assert [s.key for s in select_specs("12345")] == [s.key for s in baseline_specs()]
+    assert baseline_specs(["6"]) == [] and not any("s6_" in k for k in SCRIPT_SEEDS)
+    six = select_specs(["6"])
+    assert six == tuned_controller_specs() and select_specs(["5", "6"]) == baseline_specs(["5"]) + six
+    assert len({s.key for s in six}) == len(six) == 2 * len(TUNED_FILES) == 8
+    assert {s.experiment for s in six} == {"6"} and all(s.validate() is s for s in six)
+
+    # Each file as it says it was produced: its parameters, calibration pass iff it stored a calibration result.
+    for i, stem in enumerate(TUNED_FILES):
+        with open(os.path.join(root, "results", stem + ".json")) as f:
+            d = json.load(f)
+        cal = "cal_dir_err_med" in d["train_metrics"]
+        acq, fine = six[2 * i], six[2 * i + 1]
+        tag = ("calmag_" if cal else "rawmag_") + stem
+        assert (acq.name, fine.name) == ("s6_acq120_" + tag, "s6_fine20_" + tag)
+        assert acq.mag_calibrated == fine.mag_calibrated == cal
+        assert (acq.start_mode, fine.start_mode, acq.n_orbits, fine.n_orbits) == (1, 3, 4, 3)
+        p = d["params"]
+        got = (acq.theta_max_deg, acq.omega_max_deg_s, acq.rho, acq.enter_deg_s, acq.exit_deg_s, acq.k_damp)
+        assert got == tuple(p[k] for k in ("theta_max", "omega_max", "rho", "enter", "exit", "k_damp"))
+        assert acq.fine_weights == fine.fine_weights == (p.get("fine_theta_max", p["theta_max"]),
+                                                         p.get("fine_omega_max", p["omega_max"]),
+                                                         p.get("fine_rho", p["rho"]))
+    by_file = {stem: six[2 * i] for i, stem in enumerate(TUNED_FILES)}
+    assert [by_file[s].mag_calibrated for s in TUNED_FILES] == [False, False, True, True]
+    assert by_file["lqr_tuned2"].controller_label == by_file["lqr_tuned_cal"].controller_label   # same parameters
+
+    # A six-parameter file without the calibration pass equals rl_tune.evaluate (the nine-parameter,
+    # calibrated case is test_three_mode_specs_equal_rl_tune_evaluate).
+    params, _ = load_params(os.path.join(root, "results", "lqr_tuned.json"))
+    ref = evaluate(params, default_plant(mag_calibrated=False), seed=1, n_orbits_acq=0.05, n_orbits_fine=0.05)
+    ma, mf = (run_case(s.replace(n_orbits=0.05), 1) for s in six[:2])
+    assert "cal_dir_err_med" not in ref and "cal_dir_err_med" not in ma.extra
+    assert (ma.settle_h, ma.diverged, ma.point_mean) == (ref["acq_settle_h"], ref["acq_diverged"],
+                                                         ref["acq_point_mean"])
+    assert (mf.point_mean, mf.point_p95, mf.diverged) == (ref["fine_point_mean"], ref["fine_point_p95"],
+                                                          ref["fine_diverged"])
+    assert mf.max_rate_deg_s == ref["fine_max_rate"] and mf.know_med_all == ref["fine_knowledge_med"]
+
+    # scripts/matrix.py: id 6 is selectable, the default is not changed by it, --gate refuses it.
+    mod_spec = importlib.util.spec_from_file_location("matrix_script", os.path.join(root, "scripts", "matrix.py"))
+    matrix = importlib.util.module_from_spec(mod_spec)
+    mod_spec.loader.exec_module(matrix)
+
+    def listed(*argv):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            assert matrix.main([*argv, "--list"]) == 0
+        return buf.getvalue().splitlines()
+
+    assert listed()[-1] == "62 scenarios" and not any("s6_" in line for line in listed())
+    assert listed("--experiments", "6")[-1] == "8 scenarios"
+    assert listed("--experiments", "6", "--match", "s6_fine20_*_lqr_tuned_3mode |*")[-1] == "1 scenarios"
+    with contextlib.redirect_stderr(io.StringIO()):
+        try:
+            matrix.main(["--experiments", "6", "--gate", "--no-ledger"])
+            raise AssertionError("--gate accepted experiment 6")
+        except SystemExit as e:
+            assert e.code == 2
+
+
 def test_gate_compares_at_the_docs_printed_precision_and_never_decides_loose_claims():
     assert matches(DocCheck("k", 2, "point_mean", "3.0", 124), 3.0199) is True
     assert matches(DocCheck("k", 2, "point_mean", "3.0", 124), 3.06) is False

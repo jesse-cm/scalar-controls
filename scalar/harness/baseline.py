@@ -19,6 +19,7 @@ a run of the simulators the harness wraps.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -28,10 +29,15 @@ from ..attitude import quat_from_rotvec
 from .spec import ScenarioSpec
 
 __all__ = ["SEEDS", "PLAN_GATE_SEED", "DocCheck", "baseline_specs", "SCRIPT_SEEDS", "DOC_CHECKS",
-           "projected_weight_draws", "rl_tune_specs"]
+           "projected_weight_draws", "rl_tune_specs", "TUNED_FILES", "tuned_controller_specs",
+           "select_specs"]
 
 SEEDS = tuple(range(40))        # rule 4 of the verification-loop plan
 PLAN_GATE_SEED = 2              # the seed the plan's gate assumes
+
+# Experiment 6: the tuner outputs of sections 6-7 of the notes, in the order they were produced.
+TUNED_FILES = ("lqr_tuned", "lqr_tuned2", "lqr_tuned_cal", "lqr_tuned_3mode")
+_RESULTS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "results")
 
 _EPOCH_2024 = (2024, 3, 20, 12, 0, 0)       # Scenario() default epoch; jd 2460390.0
 _M_RES = (2e-3, -1e-3, 0.5e-3)              # residual dipole used by scripts 3, 4, 5 [A m^2]
@@ -260,3 +266,39 @@ def rl_tune_specs(params, mag_calibrated=True, n_orbits_acq=4, n_orbits_fine=3, 
     fine = ScenarioSpec(name="s6_fine20", q0=_Q_NEAR, omega0_deg_s=_W_NEAR, n_orbits=n_orbits_fine,
                         start_mode=3, **common)
     return acq, fine
+
+
+def tuned_controller_specs(files=TUNED_FILES, results_dir=_RESULTS):
+    """Experiment 6: every tuned-controller file as the two rl_tune.evaluate episodes, (acq, fine) per file.
+
+    Each file is run the way it says it was produced:
+      - parameters through rl_tune.load_params, so a six-parameter file gets a
+        fine schedule equal to its acquisition schedule;
+      - the calibration pass is on exactly when the file's stored
+        ``train_metrics`` has ``cal_dir_err_med`` (evaluate writes that key only
+        when the plant has mag_calibrated=True).
+    The magnetometer treatment is in neither the estimator nor the controller
+    label, and lqr_tuned2 / lqr_tuned_cal hold the same parameters, so the
+    scenario name carries both: ``s6_acq120_<rawmag|calmag>_<file>``.
+
+    Not a baseline: no doc check, no script seed, never part of ``--gate``.
+    """
+    from ..control.rl_tune import load_params
+    specs = []
+    for stem in files:
+        params, meta = load_params(os.path.join(results_dir, stem + ".json"))
+        cal = "cal_dir_err_med" in meta["train_metrics"]
+        tag = f"{'calmag' if cal else 'rawmag'}_{stem}"
+        specs += [s.replace(name=f"{s.name}_{tag}") for s in rl_tune_specs(params, mag_calibrated=cal)]
+    return specs
+
+
+def select_specs(experiments=None):
+    """baseline_specs(experiments), followed by tuned_controller_specs() when id '6' is asked for.
+
+    ``None`` is the baseline only (experiments 1-5); experiment 6 is never selected by default.
+    """
+    specs = baseline_specs(experiments)
+    if experiments is not None and "6" in {str(e) for e in experiments}:
+        specs += tuned_controller_specs()
+    return specs
