@@ -32,7 +32,7 @@ from ..environment.orbit import CircularOrbit
 from ..estimator.mekf import MEKF, run_mekf
 from ..scenario import Scenario
 from ..sensors.gyro import Gyro
-from ..sensors.magnetometer import Magnetometer
+from ..sensors.magnetometer import Magnetometer, sinusoid_temperature
 from ..sensors.sun_sensor import SunSensorArray
 from ..sysid.magnetorquer_id import (PulseSchedule, identify_dipole_matrix,
                                      identify_dipole_matrix_impulse, s3_coil_matrix,
@@ -81,7 +81,31 @@ def _magnetometer(spec):
         kw["bias"] = np.array(spec.mag_bias_T, float)
     if spec.mag_soft_iron is not None:
         kw["soft_iron"] = np.array(spec.mag_soft_iron, float)
+    # ---- magnetometer realism (plan row 1c) ----
+    if spec.mag_quant_T is not None:
+        kw["quantisation"] = spec.mag_quant_T
+    if spec.mag_temp_coeff_T_per_K is not None:
+        # deviation of the board temperature from the one at which mag_bias_T holds (temp_ref = 0)
+        kw["temp_coeff"] = np.array(spec.mag_temp_coeff_T_per_K, float)
+        kw["temperature"] = sinusoid_temperature(0.0, spec.mag_temp_amp_K, _orbit(spec).period,
+                                                 spec.mag_temp_phase_deg * DEG)
     return Magnetometer(**kw)
+
+
+def _mag_calibration(spec, mag, orbit, jd0, seed, extra):
+    """rl_tune.calibration_pass if the spec asks for it, else None; the run then starts at t = 0.
+
+    The pass logs one orbit at its own 1 s step with the same sensor object, so
+    quantisation and temperature drift are in the samples the ellipsoid is
+    fitted to. Rewinding the sensor clock afterwards gives the calibrated and
+    the uncalibrated run the same temperature history.
+    """
+    cal = None
+    if spec.mag_calibrated:
+        mag.reset(sample_dt=1.0)
+        cal, extra["cal_dir_err_med"] = calibration_pass(_plant(spec), mag, orbit, jd0, seed)
+    mag.reset(sample_dt=spec.dt)
+    return cal
 
 
 def _sun_sensor(spec):
@@ -204,9 +228,7 @@ def _run_closed_loop(spec, seed):
     extra = {}
 
     mag = _magnetometer(spec)
-    cal = None
-    if spec.mag_calibrated:
-        cal, extra["cal_dir_err_med"] = calibration_pass(plant, mag, orbit, jd0, seed)
+    cal = _mag_calibration(spec, mag, orbit, jd0, seed, extra)
     sensor = _sun_sensor(spec)
     ctrl, k_weights = _controller(spec, plant, acts_design, acts_true, orbit, jd0)
 
@@ -265,14 +287,18 @@ def _mekf_with_front(res, mekf, front):
 def _run_estimation(spec, seed):
     orbit = _orbit(spec)
     sensor = _sun_sensor(spec)
+    mag, cal_extra = _magnetometer(spec), {}
+    cal = _mag_calibration(spec, mag, orbit, julian_date(_epoch(spec)), seed, cal_extra)
     sc = Scenario(epoch=_epoch(spec), orbit=orbit, body=RigidBody(_inertia(spec)),
                   q0=np.array(spec.q0, float), omega0=np.array(spec.omega0_deg_s, float) * DEG,
                   dt=spec.dt, duration=spec.n_orbits * orbit.period, gyro=_gyro(spec),
-                  magnetometer=_magnetometer(spec), sun_sensor=sensor, seed=seed,
+                  magnetometer=mag, sun_sensor=sensor, seed=seed,
                   albedo_coeff=spec.albedo_coeff, field_model_error_deg=spec.field_model_error_deg,
                   field_truth=spec.field_truth)
     res = sc.run()
-    extra = {"eclipse_fraction": res.eclipse_fraction}
+    if cal is not None:
+        res = res.__class__(**{**res.__dict__, "mag_body": cal.apply(res.mag_body)})
+    extra = {"eclipse_fraction": res.eclipse_fraction, **cal_extra}
 
     # Estimator's reference field evaluated at a position shifted along track (experiment 2).
     v = orbit.radius * orbit.mean_motion

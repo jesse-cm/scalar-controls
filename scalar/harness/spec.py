@@ -71,7 +71,14 @@ class ScenarioSpec:
     mag_noise_std: Optional[float] = None           # [T]
     mag_bias_T: Optional[Vec3] = None
     mag_soft_iron: Optional[Tuple[Vec3, Vec3, Vec3]] = None
-    mag_calibrated: bool = False            # closed_loop only: rl_tune.calibration_pass before the run
+    mag_calibrated: bool = False            # closed_loop, estimation: rl_tune.calibration_pass before the run
+    # -- magnetometer realism (plan row 1c); None = off. The temperature drift is on when BOTH the
+    #    coefficient and the amplitude are set. Neither has a source in this repo: any value given
+    #    is ASSUMED until the phase-5 temperature ramp with the TMP112s (see sensors/magnetometer.py).
+    mag_quant_T: Optional[float] = None             # output LSB [T]; the plan gives 0.15e-6
+    mag_temp_coeff_T_per_K: Optional[Vec3] = None   # offset drift per axis [T/K]
+    mag_temp_amp_K: Optional[float] = None          # half the peak-to-peak board temperature swing, once per orbit [K]
+    mag_temp_phase_deg: float = 0.0                 # phase of that swing at t = 0 (0 -> at its mean, warming)
     sun_unit: str = "ideal"                 # "ideal" | "flight_like" (sun_mlp.flight_like_sensor)
     sun_unit_seed: int = 1                  # rng seed that draws the flight-like unit's systematics
     sun_gain_sigma: float = 0.05            # flight_like_sensor arguments
@@ -197,7 +204,7 @@ class ScenarioSpec:
         ctrl_fields = ("proj_q_weight", "proj_w_weight", "proj_r_weight", "theta_max_deg",
                        "omega_max_deg_s", "rho", "schedule_bins", "k_damp", "enter_deg_s",
                        "exit_deg_s", "fine_theta_max_deg", "fine_omega_max_deg_s", "fine_rho",
-                       "start_mode", "coil_scale", "inertia_scale", "mag_calibrated")
+                       "start_mode", "coil_scale", "inertia_scale")
         sysid_fields = ("pulse_duration_s", "pulse_period_s", "n_pulses", "sample_hz",
                         "impulse_window_s", "sysid_dt_sim")
         dataset_fields = ("dataset_n", "dataset_albedo_max")
@@ -239,6 +246,16 @@ class ScenarioSpec:
                          "gyro_noise_density", "gyro_bias_rw", "gyro_initial_bias_deg_s",
                          "mag_noise_std", "mag_bias_T", "mag_soft_iron", "mekf_sigma_sun",
                          why="static sun-vector dataset; use dataset_albedo_max")
+        # ---- magnetometer realism (plan row 1c) ----
+        if self.kind not in ("closed_loop", "estimation"):
+            need_default("mag_calibrated", "mag_quant_T", "mag_temp_coeff_T_per_K", "mag_temp_amp_K",
+                         "mag_temp_phase_deg", why="the harness Magnetometer is not used by this kind")
+        if (self.mag_temp_coeff_T_per_K is None) != (self.mag_temp_amp_K is None):
+            raise ValueError(f"{self.name}: mag_temp_coeff_T_per_K and mag_temp_amp_K go together")
+        if self.mag_temp_amp_K is None:
+            need_default("mag_temp_phase_deg", why="no temperature drift to phase")
+        if self.kind == "estimation" and self.mag_calibrated:
+            need_default("field_truth", why="rl_tune.calibration_pass flies the dipole field")
         return self
 
 
