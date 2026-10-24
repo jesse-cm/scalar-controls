@@ -85,10 +85,19 @@ class ScenarioSpec:
     sun_rolloff: float = 0.2
     sun_tilt_deg: float = 2.0
     sun_noise_frac: Optional[float] = None
+    # -- sun-sensor array (plan row 1f). "cube" is the six-photodiode SunSensorArray every run has
+    #    used; "veml6031" is sensors/veml6031.VEML6031Array: seven sensors, lux in 16-bit counts,
+    #    clipping at 65535. The veml_* fields need sun_array="veml6031"; None = the class default.
+    #    The analytic reconstruction always assumes veml6031.VEML6031_NORMALS, whatever veml_normals
+    #    says; an MLP front end is trained on the array as specified here (ground sweep of the unit).
+    sun_array: str = "cube"                         # "cube" | "veml6031"
+    veml_integration_ms: Optional[float] = None     # a key of veml6031.MAX_LUX_G05_PD4 (class default 25)
+    veml_normals: Optional[Tuple[Vec3, ...]] = None  # physical outward normals of the seven sensors
+    veml_clip_mode: Optional[str] = None            # analytic front end only: None | "drop" | "fill"
 
     # ---- estimator ----
     estimator: str = "mekf"                 # "mekf" | "truth" (closed_loop: controller fed the truth)
-    sun_front: str = "analytic"             # "analytic" | "mlp_a" | "mlp_b"
+    sun_front: str = "analytic"             # "analytic" | "mlp_a" | "mlp_b" | "none" (sun sensor never used)
     mlp_train_seed: int = 0
     mlp_epochs: int = 15
     mekf_n_iter: int = 3
@@ -193,7 +202,29 @@ class ScenarioSpec:
 
         one_of("kind", KINDS)
         one_of("sun_unit", ("ideal", "flight_like"))
-        one_of("sun_front", ("analytic", "mlp_a", "mlp_b"))
+        one_of("sun_front", ("analytic", "mlp_a", "mlp_b", "none"))
+        # ---- sun-sensor array (plan row 1f) ----
+        one_of("sun_array", ("cube", "veml6031"))
+        one_of("veml_clip_mode", (None, "drop", "fill"))
+        if self.sun_front == "none" and self.kind not in ("closed_loop", "estimation"):
+            raise ValueError(f"{self.name}: sun_front='none' needs an MEKF run (closed_loop or estimation)")
+        if self.sun_array == "cube":
+            need_default("veml_integration_ms", "veml_normals", "veml_clip_mode",
+                         why="sun_array='cube' is the SunSensorArray; these belong to 'veml6031'")
+        else:
+            from ..sensors.veml6031 import MAX_LUX_G05_PD4
+            if self.kind not in ("closed_loop", "estimation"):
+                raise ValueError(f"{self.name}: sun_array='veml6031' is plumbed for closed_loop and estimation only")
+            need_default("sun_unit", why="VEML6031Array has no roll-off or tilt, and the harness does not "
+                                         "plumb per-sensor gains; give the physical normals in veml_normals")
+            if self.veml_integration_ms is not None and self.veml_integration_ms not in MAX_LUX_G05_PD4:
+                raise ValueError(f"{self.name}: veml_integration_ms={self.veml_integration_ms!r} not in "
+                                 f"{sorted(MAX_LUX_G05_PD4)}")
+            if self.veml_normals is not None and (len(self.veml_normals) != 7
+                                                  or any(len(n) != 3 for n in self.veml_normals)):
+                raise ValueError(f"{self.name}: veml_normals must be seven 3-vectors (devicetree faces 0,1,2,3,5,6,7)")
+            if self.veml_clip_mode is not None and self.sun_front != "analytic":
+                raise ValueError(f"{self.name}: veml_clip_mode acts in the analytic reconstruction only")
         one_of("estimator", ("mekf", "truth"))
         one_of("controller", ("none", "projected_lqr", "periodic_lqr", "two_mode", "three_mode"))
         one_of("knowledge_window", ("last_orbit", "after_first_fifth"))

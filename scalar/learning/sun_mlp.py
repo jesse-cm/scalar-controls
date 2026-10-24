@@ -38,9 +38,10 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..sensors.sun_sensor import SunSensorArray
+from ..sensors.veml6031 import VEML6031Array
 
 __all__ = ["make_dataset", "SunMLP", "train_sun_mlp", "angular_error_deg",
-           "export_c_header", "flight_like_sensor"]
+           "export_c_header", "flight_like_sensor", "sensor_inputs", "annual_irradiance_range"]
 
 
 def flight_like_sensor(rng, gain_sigma=0.05, rolloff=0.2, tilt_deg=2.0):
@@ -66,19 +67,51 @@ def _random_unit(rng, n):
     return v / np.linalg.norm(v, axis=1, keepdims=True)
 
 
+def sensor_inputs(sensor, raw, irradiance):
+    """Raw sensor output -> the network's inputs, one per sensor, face-on Sun = 1.
+
+    SunSensorArray: photocurrents / full-scale current (as before).
+    VEML6031Array (plan row 1f): the seven counts, converted to lux and divided
+    by the face-on lux at ``irradiance``. A clipped sensor therefore reads
+    65535 * resolution / face-on lux (0.43 at 25 ms and 1 AU), and that plateau
+    moves with the irradiance; an unclipped one reads its cosine.
+    """
+    raw = np.asarray(raw, float)
+    if np.ndim(irradiance) == 1:                # one irradiance per row of raw
+        irradiance = np.asarray(irradiance, float)[:, None]
+    if isinstance(sensor, VEML6031Array):
+        return raw * sensor.resolution / sensor.face_on_lux(irradiance)
+    return raw / sensor.full_scale_current(irradiance)
+
+
+def annual_irradiance_range(n=366):
+    """(min, max) of environment.sun.solar_irradiance over one year [W/m^2]."""
+    from ..environment.sun import solar_irradiance
+    E = [solar_irradiance(2451545.0 + 365.25 * k / n) for k in range(n)]
+    return float(min(E)), float(max(E))
+
+
 def make_dataset(sensor, n, rng, albedo_max=0.5, irradiance=1361.0):
-    """(X_currents (n,6), X_extra (n,4), y_sun (n,3)) with random sun/nadir/albedo."""
+    """(X_currents (n,6), X_extra (n,4), y_sun (n,3)) with random sun/nadir/albedo.
+
+    ``irradiance`` is one value, or ``(lo, hi)`` for a uniform draw per sample
+    (drawn after everything else, so a single value consumes ``rng`` as before).
+    For a VEML6031Array X is (n,7), see ``sensor_inputs``.
+    """
     s = _random_unit(rng, n)
     nadir = _random_unit(rng, n)
     coeff = rng.uniform(0.0, albedo_max, n)
     dayside = rng.uniform(0.0, 1.0, n)
-    fs = sensor.full_scale_current(irradiance)
+    if np.ndim(irradiance) == 0:
+        E = [irradiance] * n
+    else:
+        E = rng.uniform(irradiance[0], irradiance[1], n)
     X = np.empty((n, len(sensor.true_normals)))
     for i in range(n):
-        X[i] = sensor.measure(s[i], irradiance, True, rng,
+        X[i] = sensor.measure(s[i], E[i], True, rng,
                               albedo_dir_body=nadir[i],
-                              albedo_irradiance=coeff[i] * irradiance * dayside[i])
-    X /= fs
+                              albedo_irradiance=coeff[i] * E[i] * dayside[i])
+    X = sensor_inputs(sensor, X, irradiance if np.ndim(irradiance) == 0 else E)
     extra = np.hstack([nadir, dayside[:, None]])
     return X.astype(np.float32), extra.astype(np.float32), s.astype(np.float32)
 
@@ -118,6 +151,13 @@ class SunMLP:
     def reconstruct(self, currents, irradiance, sensor, x_extra=None):
         """Drop-in for SunSensorArray.reconstruct: (s_hat, valid)."""
         c = np.asarray(currents, float)
+        if isinstance(sensor, VEML6031Array):
+            # Eclipse gate without the face layout (the opposing-pair difference below assumes
+            # one): lit when the brightest sensor reads more than min_signal_frac of face-on Sun.
+            x = sensor_inputs(sensor, c, irradiance)
+            if np.max(x) <= sensor.base.min_signal_frac:
+                return None, False
+            return self(x, x_extra), True
         fs = sensor.full_scale_current(irradiance)
         v = np.array([c[0] - c[1], c[2] - c[3], c[4] - c[5]])
         if np.linalg.norm(v) <= sensor.min_signal_frac * fs:   # same eclipse gate
@@ -126,12 +166,19 @@ class SunMLP:
 
 
 def train_sun_mlp(sensor, extra=False, n_train=200_000, n_val=20_000, hidden=32,
-                  epochs=20, seed=0, albedo_max=0.5, verbose=False):
-    """Train the MLP with torch; return (SunMLP, val_error_deg)."""
+                  epochs=20, seed=0, albedo_max=0.5, verbose=False, irradiance=None):
+    """Train the MLP with torch; return (SunMLP, val_error_deg).
+
+    ``irradiance`` goes to ``make_dataset``. None: 1361.0 for the photodiode
+    cube (its inputs do not depend on it); for a VEML6031Array the range over a
+    year, because the clip plateau in the inputs moves with the irradiance.
+    """
     import torch
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
-    Xc, Xe, y = make_dataset(sensor, n_train + n_val, rng, albedo_max)
+    if irradiance is None:
+        irradiance = annual_irradiance_range() if isinstance(sensor, VEML6031Array) else 1361.0
+    Xc, Xe, y = make_dataset(sensor, n_train + n_val, rng, albedo_max, irradiance)
     X = np.hstack([Xc, Xe]) if extra else Xc
     Xt, yt = torch.tensor(X), torch.tensor(y)
     Xtr, ytr, Xva, yva = Xt[:n_train], yt[:n_train], Xt[n_train:], yt[n_train:]

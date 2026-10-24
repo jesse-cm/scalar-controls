@@ -86,6 +86,11 @@ class VEML6031Array:
             self.aux_rng = np.random.default_rng(0)
         self.last_clipped = np.zeros(len(self.normals), dtype=bool)
 
+    @property
+    def true_normals(self):
+        """Physical normals, under the name SunSensorArray uses (scenario.Scenario sizes its log by it)."""
+        return self.normals
+
     @staticmethod
     def face_on_lux(irradiance):
         return LUX_1AU * irradiance / SOLAR_CONSTANT_1AU

@@ -108,7 +108,7 @@ def _mag_calibration(spec, mag, orbit, jd0, seed, extra):
     return cal
 
 
-def _sun_sensor(spec):
+def _sun_sensor(spec, seed=0):
     if spec.sun_unit == "flight_like":
         from ..learning.sun_mlp import flight_like_sensor
         s = flight_like_sensor(np.random.default_rng(spec.sun_unit_seed), gain_sigma=spec.sun_gain_sigma,
@@ -117,6 +117,17 @@ def _sun_sensor(spec):
         s = SunSensorArray()
     if spec.sun_noise_frac is not None:
         s.noise_frac = spec.sun_noise_frac
+    # ---- sun-sensor array (plan row 1f): the cube above becomes the VEML array's noise/gain base ----
+    if spec.sun_array == "veml6031":
+        from ..sensors.veml6031 import VEML6031Array
+        kw = {"base": s, "clip_mode": spec.veml_clip_mode,
+              # private stream of the second -Z sensor, seeded as scripts/veml6031_baseline.py does
+              "aux_rng": np.random.default_rng([int(seed), 6031])}
+        if spec.veml_integration_ms is not None:
+            kw["integration_ms"] = spec.veml_integration_ms
+        if spec.veml_normals is not None:
+            kw["normals"] = np.array(spec.veml_normals, float)
+        s = VEML6031Array(**kw)
     return s
 
 
@@ -147,10 +158,11 @@ _MLP_CACHE = {}
 
 def mlp_key(spec):
     """Cache key of the trained MLP a spec needs, or None for the analytic front end."""
-    if spec.sun_front == "analytic":
+    if spec.sun_front in ("analytic", "none"):
         return None
     return (spec.sun_front, spec.sun_unit, spec.sun_unit_seed, spec.sun_gain_sigma, spec.sun_rolloff,
-            spec.sun_tilt_deg, spec.sun_noise_frac, spec.mlp_train_seed, spec.mlp_epochs)
+            spec.sun_tilt_deg, spec.sun_noise_frac, spec.mlp_train_seed, spec.mlp_epochs,
+            spec.sun_array, spec.veml_integration_ms, spec.veml_normals)
 
 
 def _mlp(spec):
@@ -174,6 +186,8 @@ def _sun_front(spec, sensor):
     """Front-end callable in tune.py's signature, or None for the analytic reconstruction."""
     if spec.sun_front == "analytic":
         return None
+    if spec.sun_front == "none":                # plan row 1f: the sun sensor is never used
+        return lambda c, E, nb, ds: (None, False)
     mlp = _mlp(spec)
     if spec.sun_front == "mlp_a":
         return lambda c, E, nb, ds: mlp.reconstruct(c, E, sensor)
@@ -229,7 +243,7 @@ def _run_closed_loop(spec, seed):
 
     mag = _magnetometer(spec)
     cal = _mag_calibration(spec, mag, orbit, jd0, seed, extra)
-    sensor = _sun_sensor(spec)
+    sensor = _sun_sensor(spec, seed)
     ctrl, k_weights = _controller(spec, plant, acts_design, acts_true, orbit, jd0)
 
     r = simulate_closed_loop_estimated(
@@ -286,7 +300,7 @@ def _mekf_with_front(res, mekf, front):
 
 def _run_estimation(spec, seed):
     orbit = _orbit(spec)
-    sensor = _sun_sensor(spec)
+    sensor = _sun_sensor(spec, seed)
     mag, cal_extra = _magnetometer(spec), {}
     cal = _mag_calibration(spec, mag, orbit, julian_date(_epoch(spec)), seed, cal_extra)
     sc = Scenario(epoch=_epoch(spec), orbit=orbit, body=RigidBody(_inertia(spec)),
