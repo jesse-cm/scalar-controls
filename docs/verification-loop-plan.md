@@ -174,9 +174,62 @@ of dipole over a step, second-order attitude step, frame labelled J2000 but
 of-date). The first two enter phase 1 as switches; the first must land before
 row 1e is run.
 
+### 2026-10-24 — tuned controllers at 40 seeds (ledger experiment 6)
+
+Rows `s6_acq120_*` and `s6_fine20_*`, seed sets `0-39` and `100-114`
+(`python3 scripts/matrix.py --experiments 6 --seeds 0-39`). Seeds 0 and 1
+reproduce the stored `train_metrics` of `results/lqr_tuned_3mode.json` to the
+last digit.
+
+| Tuned file | Magnetometer | Acquisition diverged, of 40 / of 15 | Fine diverged | Fine pointing mean, median across seeds, 0–39 / 100–114 | Acquisition settle, median |
+|---|---|---|---|---|---|
+| `lqr_tuned` | raw | 11 / 5 | 0 / 0 | 7.93° / 9.70° | 6.02 h / 6.25 h |
+| `lqr_tuned2` | raw | 10 / 2 | 0 / 0 | 7.66° / 9.43° | 6.02 h / 5.60 h |
+| `lqr_tuned_cal` | calibrated | 5 / 5 | 0 / 0 | 5.52° / 6.89° | 5.18 h / 5.21 h |
+| `lqr_tuned_3mode` | calibrated | 6 / 1 | 0 / 0 | 5.44° / 6.73° | 5.12 h / 5.15 h |
+
+Conclusions against the thresholds in rule 2:
+
+1. Fine pointing never diverges for any tuned file on any of the 55 seeds.
+   The tuner did fix what the hand-picked design got wrong there.
+2. The fine-pointing mean stays above the 5° placeholder on the median seed
+   for every file; the calibrated files come closest. This agrees with
+   sections 6–8 of the notes.
+3. "Acquisition diverged = 0" fails for every file: 5 to 11 of 40 seeds are
+   flagged. Calibration roughly halves the count.
+4. Before conclusion 3 is trusted, the two acquisition measures must be
+   reconciled. For the three-mode file, seeds 5, 9, 28, 32, 37 and 101 are
+   flagged diverged yet have a finite settle time, and seed 35 never settles
+   yet is not flagged. Hypothesis, not run: the same mismatch between the two
+   definitions is behind the open acquisition item below.
+
+### 2026-10-24 — phase 1, row 1c (magnetometer realism)
+
+Rows `e2_alongtrack_0km+mag1c_*` and `e4D_acq120_mekf+mag1c_*`, seeds 0–39
+(`python3 scripts/mag_realism.py --seeds 0-39`). Switches are off by default;
+the gate is unchanged with them off.
+
+| Scenario | Off | On, uncalibrated | On, calibrated |
+|---|---|---|---|
+| Open loop, knowledge median (median across seeds) | 0.417° | 1.464° | 0.599° |
+| Closed loop, two-mode September design: diverged of 40 | 11 | 23 | 15 |
+| Closed loop: pointing mean, median across seeds | 5.75° | 52.5° | 7.92° |
+
+1. The row's assertion holds: knowledge degrades, and the ellipsoid
+   calibration recovers most of it.
+2. Quantisation at 0.15 µT is invisible next to the sensor noise (it moves
+   the open-loop knowledge median by less than 0.001°; asserted in
+   `tests/test_mag_realism.py`).
+3. The temperature drift rests on two ASSUMED values with no source in this
+   repo (offset coefficient and the once-per-orbit temperature swing, both in
+   `scripts/mag_realism.py`). Not a ledger row: at ten times the assumed drift
+   the plain ellipsoid fit recovers almost nothing (8 seeds). The phase-5
+   temperature-ramp log replaces both values.
+
 ### Not started
 
-Phases 1, 3 and 4. Phase 5 needs the hardware.
+Phase 1 rows 1a, 1b, 1d–1h and the plant-step row; phases 3 and 4. Phase 5
+needs the hardware.
 
 ### Open
 
