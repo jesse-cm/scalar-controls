@@ -226,14 +226,120 @@ the gate is unchanged with them off.
    the plain ellipsoid fit recovers almost nothing (8 seeds). The phase-5
    temperature-ramp log replaces both values.
 
+### 2026-10-24 — phase 1, plant-step row (added after the cross-check)
+
+Switches `plant_hold` and `plant_substeps`, off by default; rows
+`*+plant_dipole_x2` and one `+plant_dipole_x4`, seeds 0–39
+(`python3 scripts/plant_step_rows.py --plant-hold dipole --plant-substeps 2
+--seeds 0-39`). Effect tests in `tests/test_plant_step.py`.
+
+1. Holding the dipole instead of the torque moves the truth attitude by 1.86°
+   over the cross-check's detumble orbit; two substeps are converged (×2
+   against ×4 differs by 0.004°). This is discrepancy D of the cross-check,
+   reproduced without Basilisk.
+2. At scenario level the counts barely move (two-mode September design: 11 of
+   40 lost with the switch off, 12 on, 14 at four substeps).
+3. Which seeds are lost does move: between two and four substeps the flag
+   differs on 12 of 40 seeds. A change of 0.004° in the plant reshuffles
+   individual acquisition outcomes, so a lost-seed count from 40 seeds is a
+   rate with a wide spread, not a list of bad seeds.
+
+### 2026-10-24 — phase 1, row 1h (gyro realism)
+
+Rows `*+gyro1h`, seeds 0–39 (`python3 scripts/gyro_realism.py --seeds 0-39`).
+All four terms on: temperature-dependent bias, 1 % scale factor, 0.5°
+misalignment, output quantisation.
+
+| Scenario | Off | On |
+|---|---|---|
+| Open loop, knowledge median (median across seeds) | 0.417° | 1.071° |
+| Tuned three-mode, acquisition: lost of 40 | 6 | 39 |
+| Tuned three-mode, fine pointing: lost of 40 | 0 | 40 |
+
+1. The row's assertion holds: bias-estimate error and knowledge shift.
+2. The closed-loop loss is the temperature term alone. Not ledger rows: with
+   the other three terms on and temperature off, fine pointing loses 0 of 40
+   and is within 0.15° per seed; with the temperature coefficient scaled to
+   3 % of the ASSUMED value, 0 of 8 are lost.
+3. The temperature coefficient and the board temperature swing are ASSUMED
+   (`scripts/gyro_realism.py`, `scripts/mag_realism.py`); no value for either
+   is in the repo. Until the phase-5 temperature ramp is logged, this row says
+   that the loop has no tolerance to a gyro bias that follows board
+   temperature, not that the flight gyro has one of this size.
+4. The filter cannot follow the drift by raising its bias process noise alone
+   (open loop, 4 seeds). Candidates, none run: subtract a ground-calibrated
+   temperature term using the TMP112 reading; a temperature-slope state.
+
+### 2026-10-24 — phase 1, row 1f (VEML6031 sun sensor) and Earth albedo
+
+Rows `*+veml*`, `*+alb*` and `*_L-*`
+(`python3 scripts/sun_realism.py --experiments 1f,1f-normals,1f-albedo`).
+The `+alb*` and `_L-*` rows were run on the WashU cluster at commit `28c434b`;
+see the note on platforms below.
+
+Tuned three-mode controller, fine pointing, seeds 0–39, lost of 40 and
+pointing mean (median across seeds):
+
+| Sun sensor, front end | No albedo | Albedo 0.3 | Albedo 0.5 |
+|---|---|---|---|
+| Cube, analytic | 0, 5.44° | 0, 12.84° | 40, lost |
+| Cube, MLP-B | — | 0, 5.90° | 0, 7.34° |
+| Cube, sun sensor unused | — | 0, 11.18° | 0, 11.18° |
+| VEML 6.25 ms, analytic | 0, 5.50° | 0, 12.85° | 39, lost |
+| VEML 6.25 ms, MLP-B | 0, 7.36° | 0, 7.10° | 7, 9.08° |
+| VEML 25 ms, analytic | 37, lost | — | — |
+| VEML 25 ms, MLP-B | 0, 9.93° | — | — |
+
+1. The row's assertion holds: at 25 ms every sunlit sample clips and the
+   analytic reconstruction loses pointing on 37 of 40; at 6.25 ms the real
+   sensor matches the ideal cube.
+2. With albedo, the analytic front end is not usable for pointing even with
+   the tuned controller. MLP-B holds fine pointing at both albedo levels on
+   the cube and at 0.3 on the VEML array; on the VEML array at 0.5 it loses 7
+   of 40.
+3. Not using the sun sensor is immune to albedo and costs about 6° against
+   the no-albedo result.
+4. Acquisition with albedo (cube): analytic 3 of 40 flagged at 0.3 and 40 at
+   0.5; MLP-B 2 and 9. Subject to the acquisition-measure item under Open.
+5. Sensor-direction sweep (seed set 0–7, open loop, knowledge median): with
+   the side faces mis-assigned the analytic front end goes from 0.42° to
+   between 1.2° and 69°; a 2° mounting tilt costs 0.02°. A network trained on
+   the layout flown stays at 0.41–0.48° on every layout.
+6. Every network here is trained and tested on this simulator's sensor and
+   albedo models. These rows show the method can work, not that a given
+   network will.
+
+### 2026-10-24 — where runs are made, and what that does to the rows
+
+From this date simulation runs are made on the WashU engineering cluster
+(Linux, Python 3.9), not on the laptop that produced the earlier rows. The
+same commit gives slightly different numbers on the two: fine-pointing means
+agree to about 1e-6°, and acquisition results differ visibly (for the
+three-mode file on seeds 0–1, settle 3.63 h against 3.56 h), consistent with
+conclusion 3 of the plant-step row. The ledger has no platform column. Rows
+with git hash `28c434b` and later are cluster rows; a lost-seed count or an
+acquisition figure should be compared only with rows from the same platform.
+
 ### Not started
 
-Phase 1 rows 1a, 1b, 1d–1h and the plant-step row; phases 3 and 4. Phase 5
-needs the hardware.
+Phase 1 rows 1a, 1b, 1d, 1e and 1g; phases 3 and 4. Phase 5 needs the
+hardware.
 
 ### Open
 
-Acquisition results for `results/lqr_tuned_3mode.json` do not reconcile
-between its stored `train_metrics`, `results/lqi_fine.json` and a run today
-(seeds 0 and 1 reproduce the stored numbers; seed 101 diverges in
-acquisition). See section 10 of the notes. Cause not investigated.
+- Acquisition results for `results/lqr_tuned_3mode.json` do not reconcile
+  between its stored `train_metrics`, `results/lqi_fine.json` and later runs
+  (seeds 0 and 1 reproduce the stored numbers; seed 101 diverges in
+  acquisition). See section 10 of the notes. Cause not confirmed; the two
+  items below are the candidates.
+- The two acquisition measures overlap. The episode is 4 orbits (6.38 h), the
+  lost flag looks at the last orbit (from 4.78 h) and the settle limit is 6 h.
+  Of the 7 flagged seeds of the three-mode file (55 seeds), 6 met the settle
+  condition during the last orbit. A 6-orbit episode is being run to separate
+  slow from lost.
+- `scalar/control/tune.py` records knowledge and pointing error one step late
+  (the estimate at t_k against the truth at t_k + dt). It adds about
+  |rate| x dt to the knowledge error, 1.4° at the start of an acquisition and
+  negligible in fine pointing. To be fixed before row 1e is run.
+- `scripts/estimator_levers.py` and `scripts/mechanism_gyro_bias.py` carry
+  their own copies of the closed loop and do not get the plant switches.
