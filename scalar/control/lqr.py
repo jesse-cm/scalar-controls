@@ -69,7 +69,9 @@ class MagnetorquerLQR:
 
     def desired_torque(self, q, omega):
         """Full 3-axis LQR torque request (before the magnetic projection)."""
-        dtheta = attitude_error_rotvec(q, self.q_target)
+        # d/dt attitude_error_rotvec(q, q_target) = -omega with q_{B<-I}; the
+        # plant in lqr_gain assumes dtheta_dot = +domega, so the error enters negated.
+        dtheta = -attitude_error_rotvec(q, self.q_target)
         domega = np.asarray(omega, float) - self.w_target
         return -self.K @ np.concatenate([dtheta, domega])
 

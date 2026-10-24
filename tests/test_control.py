@@ -10,7 +10,8 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scalar.actuators.magnetorquer import default_actuator_set  # noqa: E402
-from scalar.attitude import IDENTITY_QUAT  # noqa: E402
+from scalar.attitude import (IDENTITY_QUAT, attitude_error_angle,  # noqa: E402
+                             attitude_error_rotvec, quat_from_rotvec)
 from scalar.control.lqr import MagnetorquerLQR, lqr_gain  # noqa: E402
 from scalar.dynamics import RigidBody, default_inertia, simulate_controlled  # noqa: E402
 from scalar.environment.orbit import CircularOrbit  # noqa: E402
@@ -39,6 +40,36 @@ def test_lqr_gain_stabilizes_plant():
 def test_zero_torque_at_target():
     _, ctrl = _controller()
     assert np.allclose(ctrl.desired_torque(ctrl.q_target, ctrl.w_target), 0.0)
+
+
+def test_attitude_feedback_is_restoring():
+    """Sign of the attitude term in ``desired_torque``, with no magnetics involved.
+
+    Measures two things, both on the full 3-axis torque request (before the
+    perpendicular-to-B projection, so underactuation plays no part):
+
+    1. At rest, offset from the target by e = attitude_error_rotvec(q, target),
+       the requested angular acceleration must have a positive component along
+       e. This repo's kinematics give d/dt e = -omega (see
+       test_periodic_lqr.test_error_vector_derivative_sign), so only an
+       acceleration along +e shrinks the error.
+    2. Applying that request as an ideal torque for 120 s from 10 deg at rest,
+       the error angle must end below where it started.
+
+    It does not say the magnetic controller points: with the projection in the
+    loop this time-invariant design does not (docs/learned-estimation-and-
+    control.md, section 4).
+    """
+    body, ctrl = _controller()
+    q0 = quat_from_rotvec(np.deg2rad(10.0) * np.array([0.6, 0.0, 0.8]))
+    e0 = attitude_error_rotvec(q0, ctrl.q_target)
+    accel0 = body.inv_inertia @ ctrl.desired_torque(q0, np.zeros(3))
+    assert e0 @ accel0 > 0.0, e0 @ accel0
+
+    tl, _ = simulate_controlled(body, q0, np.zeros(3), dt=1.0, n_steps=120,
+                                torque_fn=lambda t, q, w: ctrl.desired_torque(q, w))
+    err_end = np.degrees(attitude_error_angle(tl.q[-1], ctrl.q_target))
+    assert err_end < 10.0, err_end
 
 
 def test_realized_torque_is_perpendicular_to_B():
