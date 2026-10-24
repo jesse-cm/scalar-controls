@@ -69,6 +69,19 @@ C. AGAINST THE STORED RUN. results/veml6031_baseline.json was produced by
    section 9). In closed loop the sun sensor is worth more: without it the
    pointing mean is at least 0.8 deg above the stored cube run "B" (measured
    1.72: 9.12 against 7.40).
+   "Same numbers" means same within floating-point drift across platforms,
+   not bit-identical. The stored file was made on an arm64 Mac (numpy 2.2);
+   on Linux x86 (Python 3.9, numpy 2.0.2) the no-sun run differed by 1.1e-6
+   deg in the pointing mean and 1.2e-7 deg in the knowledge median. The
+   tolerance is 1e-3 deg: about 1000x that drift, and about 1000x below what
+   a plumbing mistake costs (the nearest other stored seed-100 run, clip
+   "fill", is 1.3 deg away in pointing mean and 0.46 deg in knowledge).
+   "VEML 25ms" loses pointing (error above 90 deg in the last orbit, stored
+   p95 168 deg), after which the trajectory depends on rounding: Linux gave
+   a pointing mean of 67.0 deg against the stored 54.4. That case is checked
+   for what is robust instead: pointing is lost, and the clipped sensor
+   leaves knowledge at least 1 deg worse than no sun sensor (measured 2.84
+   here, 2.73 on Linux). No other stored seed-100 run loses pointing.
 
 ASSUMED values: none enter these tests except through LAYOUTS["cube_tilt2"]
 (scripts/sun_realism.py, ASSUMED_TILT_DEG), which is only checked for shape.
@@ -117,6 +130,8 @@ KNOW_LAYOUT_MIN_LOSS_DEG = 0.4
 KNOW_NOSUN_LOSS_RANGE_DEG = (0.01, 0.1)     # no sun sensor minus cube
 KNOW_SAT_WORSE_THAN_NOSUN_DEG = 0.15        # 25 ms analytic minus no sun sensor
 POINT_NOSUN_MIN_LOSS_DEG = 0.8              # C: closed loop, seed 100, against the stored cube run
+STORED_RUN_TOL_DEG = 1e-3                   # C: cross-platform drift (measured 1.1e-6) << this << plumbing (>= 0.46)
+LOST_KNOW_MIN_LOSS_DEG = 1.0                # C: 25 ms knowledge median minus the stored no-sun run
 
 _CONFIGS = {
     "cube": {},
@@ -336,16 +351,23 @@ def test_wrong_layout_and_no_sun_sensor_both_cost_knowledge():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("config, stored", [
-    (dict(sr.veml_fields(25)), "VEML 25ms"),
-    (dict(sun_front="none"), "VEML 25ms clip-drop"),
+@pytest.mark.parametrize("config, stored, loses_pointing", [
+    (dict(sr.veml_fields(25)), "VEML 25ms", True),
+    (dict(sun_front="none"), "VEML 25ms clip-drop", False),
 ])
-def test_closed_loop_reproduces_the_stored_veml_run(config, stored):
+def test_closed_loop_reproduces_the_stored_veml_run(config, stored, loses_pointing):
     with open(os.path.join(_ROOT, "results", "veml6031_baseline.json")) as f:
         runs = json.load(f)["runs"]
     ref, cube = runs[stored]["seeds"]["100"], runs["B"]["seeds"]["100"]
     m = run_case(sr.fine_base().replace(name="t_stored", **config), 100)
-    assert abs(m.point_mean - ref["point_mean"]) < 1e-6
-    assert abs(m.point_p95 - ref["point_p95"]) < 1e-6
-    assert abs(m.know_med_all - ref["know_med"]) < 1e-6
+    if loses_pointing:
+        # after pointing is lost the numbers depend on rounding; check what is robust (docstring, C)
+        nosun = runs["VEML 25ms clip-drop"]["seeds"]["100"]
+        assert ref["point_p95"] > 90.0 and m.diverged == 1.0, (ref["point_p95"], m.point_p95, m.diverged)
+        assert m.know_med_all - nosun["know_med"] >= LOST_KNOW_MIN_LOSS_DEG, (m.know_med_all, nosun["know_med"])
+    else:
+        assert m.diverged == 0.0
+        assert abs(m.point_mean - ref["point_mean"]) < STORED_RUN_TOL_DEG, (m.point_mean, ref["point_mean"])
+        assert abs(m.point_p95 - ref["point_p95"]) < STORED_RUN_TOL_DEG, (m.point_p95, ref["point_p95"])
+        assert abs(m.know_med_all - ref["know_med"]) < STORED_RUN_TOL_DEG, (m.know_med_all, ref["know_med"])
     assert m.point_mean - cube["point_mean"] >= POINT_NOSUN_MIN_LOSS_DEG     # either way the sun sensor is lost
