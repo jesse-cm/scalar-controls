@@ -211,8 +211,7 @@ def main(argv=None):
         sys.exit("sun_realism.py: --gate does not apply (no doc numbers for these scenarios)")
     if not any(a == "--experiments" or a.startswith("--experiments=") for a in argv):
         argv = ["--experiments", "1f", *argv]
-    matrix.select_specs = _specs_for_matrix
-    return matrix.main(argv)
+    return matrix.main(argv, select=_specs_for_matrix)
 
 
 if __name__ == "__main__":
