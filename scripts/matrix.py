@@ -58,7 +58,11 @@ def write_per_seed(path, specs, cases):
                         json.dumps(m.extra, sort_keys=True)])
 
 
-def main(argv=None):
+def main(argv=None, select=None):
+    """``select(experiments) -> specs`` replaces select_specs: the route for the row scripts
+    (mag_realism.py, gyro_realism.py, plant_step_rows.py), which pass their own scenario list
+    here instead of patching a module name that can change under them (tests/test_row_scripts.py)."""
+    select = select_specs if select is None else select
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--experiments", default="1,2,3,4,5", help="comma list of experiment ids (default the baseline, 1-5; 6 = tuned controllers)")
     ap.add_argument("--match", default=None, help="glob on 'scenario | estimator | controller'")
@@ -74,7 +78,7 @@ def main(argv=None):
     experiments = [e.strip() for e in a.experiments.split(",")]
     if a.gate and "6" in experiments:
         ap.error("--gate compares experiments 1-5 against the doc; experiment 6 has no gate numbers")
-    specs = select_specs(experiments)
+    specs = select(experiments)
     if a.match:
         specs = [s for s in specs if fnmatch.fnmatch(s.key, a.match)]
     if not specs:

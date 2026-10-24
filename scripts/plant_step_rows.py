@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import matrix  # noqa: E402  (scripts/matrix.py; it puts the repo root on sys.path)
 
 from scalar.dynamics import PLANT_HOLDS  # noqa: E402
+from scalar.harness.baseline import select_specs  # noqa: E402
 
 
 def main(argv=None):
@@ -37,15 +38,13 @@ def main(argv=None):
     a, rest = ap.parse_known_args(argv)
     if "--gate" in rest:
         ap.error("--gate compares the baseline plant with the doc; use scripts/matrix.py for it")
-    baseline_specs = matrix.baseline_specs
 
     def switched_specs(experiments=None):
         return [s.replace(name=f"{s.name}+plant_{a.plant_hold}_x{a.plant_substeps}",
                           plant_hold=a.plant_hold, plant_substeps=a.plant_substeps)
-                for s in baseline_specs(experiments) if s.kind == "closed_loop"]
+                for s in select_specs(experiments) if s.kind == "closed_loop"]
 
-    matrix.baseline_specs = switched_specs
-    return matrix.main(rest)
+    return matrix.main(rest, select=switched_specs)
 
 
 if __name__ == "__main__":

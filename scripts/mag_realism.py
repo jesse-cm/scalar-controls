@@ -107,8 +107,7 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else list(argv)
     if "--gate" in argv:
         sys.exit("mag_realism.py: --gate does not apply (no doc numbers for these scenarios)")
-    matrix.baseline_specs = _specs_for_matrix
-    return matrix.main(argv)
+    return matrix.main(argv, select=_specs_for_matrix)
 
 
 if __name__ == "__main__":

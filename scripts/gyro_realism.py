@@ -227,8 +227,7 @@ def main(argv=None):
         return _print_bias_table(argv)
     if "--experiments" not in argv:
         argv = ["--experiments", "2,6", *argv]        # the three ledger rows
-    matrix.select_specs = _specs_for_matrix
-    return matrix.main(argv)
+    return matrix.main(argv, select=_specs_for_matrix)
 
 
 if __name__ == "__main__":
