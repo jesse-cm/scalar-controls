@@ -70,6 +70,19 @@ def _gyro(spec):
         kw["bias_rw"] = spec.gyro_bias_rw
     if spec.gyro_initial_bias_deg_s is not None:
         kw["initial_bias"] = np.array(spec.gyro_initial_bias_deg_s, float) * DEG
+    # ---- gyro realism (plan row 1h) ----
+    if spec.gyro_scale_factor is not None:
+        kw["scale_factor"] = np.array(spec.gyro_scale_factor, float)
+    if spec.gyro_misalign_deg is not None:
+        kw["misalignment"] = np.array(spec.gyro_misalign_deg, float) * DEG
+    if spec.gyro_quant_deg_s is not None:
+        kw["quantisation"] = spec.gyro_quant_deg_s * DEG
+    if spec.gyro_temp_coeff_deg_s_per_K is not None:
+        # deviation of the board temperature from the one at which the initial bias holds
+        # (temp_ref = 0); the same profile _magnetometer builds, so both sensors see one board
+        kw["temp_coeff"] = np.array(spec.gyro_temp_coeff_deg_s_per_K, float) * DEG
+        kw["temperature"] = sinusoid_temperature(0.0, spec.gyro_temp_amp_K, _orbit(spec).period,
+                                                 spec.gyro_temp_phase_deg * DEG)
     return Gyro(**kw)
 
 
@@ -252,7 +265,8 @@ def _run_closed_loop(spec, seed):
         dt=spec.dt, n_orbits=spec.n_orbits, seed=seed, albedo_coeff=spec.albedo_coeff,
         use_truth=(spec.estimator == "truth"), controller=ctrl, m_res=np.array(spec.m_res, float),
         sun_sensor=sensor, sun_front=_sun_front(spec, sensor), sigma_sun=spec.mekf_sigma_sun,
-        magnetometer=mag, mag_calibration=cal, gyro=_gyro(spec))
+        magnetometer=mag, mag_calibration=cal, gyro=_gyro(spec),
+        plant_hold=spec.plant_hold, plant_substeps=spec.plant_substeps)
 
     n_last = int(orbit.period / spec.dt)        # the scripts' "last orbit" slice
     last = slice(-n_last, None)

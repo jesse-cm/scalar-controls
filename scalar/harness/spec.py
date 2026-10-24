@@ -63,11 +63,24 @@ class ScenarioSpec:
     # ---- sampling ----
     dt: float = 1.0                         # sensor = estimator = control step [s]
     n_orbits: float = 1.0
+    plant_hold: str = "torque"              # closed_loop only: "torque" | "dipole" held over dt (dynamics.plant_step)
+    plant_substeps: int = 1                 # closed_loop only: truth integration substeps per dt
 
     # ---- sensors (None -> the sensor class / wrapped function default) ----
     gyro_noise_density: Optional[float] = None      # [rad/s/sqrt(Hz)]
     gyro_bias_rw: Optional[float] = None            # [rad/s/sqrt(s)]
     gyro_initial_bias_deg_s: Optional[Vec3] = None
+    # -- gyro realism (plan row 1h); None = off. Scale factor (1 %) and misalignment (0.5 deg) are the
+    #    plan's sizes; the output step and the temperature coefficient have no source in this repo and
+    #    any value given is ASSUMED (see sensors/gyro.py). The temperature drift is on when BOTH the
+    #    coefficient and the amplitude are set; the swing is the board's, so with the magnetometer
+    #    drift also on, amplitude and phase must equal mag_temp_amp_K / mag_temp_phase_deg.
+    gyro_scale_factor: Optional[Vec3] = None            # scale-factor error per axis, fraction (0.01 = 1 %)
+    gyro_misalign_deg: Optional[Vec3] = None            # rotation vector of the sensor-from-body DCM [deg]
+    gyro_quant_deg_s: Optional[float] = None            # output LSB [deg/s]
+    gyro_temp_coeff_deg_s_per_K: Optional[Vec3] = None  # zero-rate drift per axis [deg/s/K]
+    gyro_temp_amp_K: Optional[float] = None             # half the peak-to-peak board temperature swing, once per orbit [K]
+    gyro_temp_phase_deg: float = 0.0                    # phase of that swing at t = 0 (0 -> at its mean, warming)
     mag_noise_std: Optional[float] = None           # [T]
     mag_bias_T: Optional[Vec3] = None
     mag_soft_iron: Optional[Tuple[Vec3, Vec3, Vec3]] = None
@@ -231,6 +244,9 @@ class ScenarioSpec:
         one_of("actuation_window", ("run", "last_orbit"))
         one_of("coil_set", ("s3_on_s6",))
         one_of("field_truth", ("dipole", "igrf"))
+        one_of("plant_hold", ("torque", "dipole"))
+        if not isinstance(self.plant_substeps, int) or self.plant_substeps < 1:
+            raise ValueError(f"{self.name}: plant_substeps={self.plant_substeps!r} must be an integer >= 1")
 
         ctrl_fields = ("proj_q_weight", "proj_w_weight", "proj_r_weight", "theta_max_deg",
                        "omega_max_deg_s", "rho", "schedule_bins", "k_damp", "enter_deg_s",
@@ -261,6 +277,8 @@ class ScenarioSpec:
                 need_default("start_mode", why="no supervisor")
         else:
             need_default(*ctrl_fields, why="no controller in this kind")
+            need_default("plant_hold", "plant_substeps",
+                         why="only tune.simulate_closed_loop_estimated takes the plant switches")
             if self.controller != "none" or self.estimator != "mekf":
                 raise ValueError(f"{self.name}: kind={self.kind!r} has no controller and no truth feedback")
         if self.kind == "estimation":
@@ -277,6 +295,19 @@ class ScenarioSpec:
                          "gyro_noise_density", "gyro_bias_rw", "gyro_initial_bias_deg_s",
                          "mag_noise_std", "mag_bias_T", "mag_soft_iron", "mekf_sigma_sun",
                          why="static sun-vector dataset; use dataset_albedo_max")
+        # ---- gyro realism (plan row 1h) ----
+        if self.kind not in ("closed_loop", "estimation"):
+            need_default("gyro_scale_factor", "gyro_misalign_deg", "gyro_quant_deg_s",
+                         "gyro_temp_coeff_deg_s_per_K", "gyro_temp_amp_K", "gyro_temp_phase_deg",
+                         why="the harness Gyro is not used by this kind")
+        if (self.gyro_temp_coeff_deg_s_per_K is None) != (self.gyro_temp_amp_K is None):
+            raise ValueError(f"{self.name}: gyro_temp_coeff_deg_s_per_K and gyro_temp_amp_K go together")
+        if self.gyro_temp_amp_K is None:
+            need_default("gyro_temp_phase_deg", why="no temperature drift to phase")
+        elif self.mag_temp_amp_K is not None and (
+                (self.gyro_temp_amp_K, self.gyro_temp_phase_deg) != (self.mag_temp_amp_K, self.mag_temp_phase_deg)):
+            raise ValueError(f"{self.name}: gyro and magnetometer sit on one board; "
+                             "their temperature amplitude and phase must be equal")
         # ---- magnetometer realism (plan row 1c) ----
         if self.kind not in ("closed_loop", "estimation"):
             need_default("mag_calibrated", "mag_quant_T", "mag_temp_coeff_T_per_K", "mag_temp_amp_K",

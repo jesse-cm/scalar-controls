@@ -22,9 +22,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..actuators.magnetorquer import ActuatorSet, Magnetorquer
-from ..attitude import (IDENTITY_QUAT, attitude_error_angle, propagate,
-                        to_body)
-from ..dynamics import RigidBody
+from ..attitude import IDENTITY_QUAT, attitude_error_angle, to_body
+from ..dynamics import RigidBody, check_plant_switches, plant_step
 from ..environment.magfield import magnetic_field_eci
 from ..environment.sun import eclipse_factor, solar_irradiance, sun_direction_eci
 from ..estimator.mekf import MEKF
@@ -91,7 +90,8 @@ def simulate_closed_loop_estimated(body, actuators, orbit, jd0, K_weights=None,
                                    albedo_coeff=0.0, use_truth=False, controller=None,
                                    m_res=None, sun_sensor=None, sun_front=None,
                                    sigma_sun=None, magnetometer=None,
-                                   mag_calibration=None, gyro=None):
+                                   mag_calibration=None, gyro=None,
+                                   plant_hold="torque", plant_substeps=1):
     """Truth -> sensors -> MEKF -> controller -> coils, at ``dt`` (1 s = flight ceiling).
 
     ``controller`` is any object with ``dipole(t, q, omega, B_meas) -> m`` and a
@@ -99,7 +99,15 @@ def simulate_closed_loop_estimated(body, actuators, orbit, jd0, K_weights=None,
     ``sun_sensor`` overrides the ideal array (e.g. a flight-like unit) and
     ``sun_front(currents, E, nadir_body_pred, dayside) -> (s_hat, valid)``
     replaces the analytic reconstruction (e.g. the learned MLP front end).
+
+    The truth is integrated in ``plant_substeps`` substeps per ``dt``; sensors,
+    estimator and controller still run once per ``dt``. ``plant_hold="torque"``
+    freezes the body torque of the control instant over ``dt``;
+    ``plant_hold="dipole"`` freezes the dipole (command plus ``m_res``) and lets
+    the torque follow the true body field inside the step
+    (``scalar.dynamics.plant_step``). The defaults are the original plant.
     """
+    check_plant_switches(plant_hold, plant_substeps)
     rng = np.random.default_rng(seed)
     gyro = Gyro() if gyro is None else gyro
     mag = Magnetometer() if magnetometer is None else magnetometer
@@ -116,6 +124,10 @@ def simulate_closed_loop_estimated(body, actuators, orbit, jd0, K_weights=None,
     n_sat = 0
     started = False
     m_max = actuators.m_max_vector
+
+    def field_eci(time):                    # truth field along the orbit, for the dipole hold
+        return magnetic_field_eci(orbit.position(time), jd0 + time / 86400.0)
+
     for k in range(n):
         t = t_arr[k]
         jd = jd0 + t / 86400.0
@@ -150,12 +162,13 @@ def simulate_closed_loop_estimated(body, actuators, orbit, jd0, K_weights=None,
         m = ctrl.dipole(t, q_c, w_c, B_c)
         n_sat += int(np.any(np.abs([m @ tq.axis for tq in actuators.torquers]) >= 0.999 * m_max))
         m_dist = np.zeros(3) if m_res is None else np.asarray(m_res, float)
-        tau = np.cross(m + m_dist, to_body(q, B_eci))   # truth torque incl. residual dipole
-        # --- plant (RK4 on omega, exp-map on q, zero-order-hold torque) ---
-        k1 = body.omega_dot(w, tau); k2 = body.omega_dot(w + 0.5*dt*k1, tau)
-        k3 = body.omega_dot(w + 0.5*dt*k2, tau); k4 = body.omega_dot(w + dt*k3, tau)
-        w_next = w + dt/6*(k1 + 2*k2 + 2*k3 + k4)
-        q = propagate(q, 0.5*(w + w_next), dt); w = w_next
+        # --- plant (RK4 on omega, exp-map on q; what is held over dt is plant_hold) ---
+        if plant_hold == "torque":
+            tau = np.cross(m + m_dist, to_body(q, B_eci))   # truth torque incl. residual dipole
+            q, w = plant_step(body, q, w, dt, tau, plant_substeps)
+        else:
+            q, w = plant_step(body, q, w, dt, substeps=plant_substeps, dipole=m + m_dist,
+                              field_fn=field_eci, t=t)
         pe[k] = np.degrees(attitude_error_angle(q, ctrl.q_target))
         ke[k] = np.degrees(attitude_error_angle(mekf.q, q))
         rate[k] = np.degrees(np.linalg.norm(w)); mh[k] = m
