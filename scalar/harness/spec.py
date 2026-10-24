@@ -63,6 +63,8 @@ class ScenarioSpec:
     # ---- sampling ----
     dt: float = 1.0                         # sensor = estimator = control step [s]
     n_orbits: float = 1.0
+    plant_hold: str = "torque"              # closed_loop only: "torque" | "dipole" held over dt (dynamics.plant_step)
+    plant_substeps: int = 1                 # closed_loop only: truth integration substeps per dt
 
     # ---- sensors (None -> the sensor class / wrapped function default) ----
     gyro_noise_density: Optional[float] = None      # [rad/s/sqrt(Hz)]
@@ -200,6 +202,9 @@ class ScenarioSpec:
         one_of("actuation_window", ("run", "last_orbit"))
         one_of("coil_set", ("s3_on_s6",))
         one_of("field_truth", ("dipole", "igrf"))
+        one_of("plant_hold", ("torque", "dipole"))
+        if not isinstance(self.plant_substeps, int) or self.plant_substeps < 1:
+            raise ValueError(f"{self.name}: plant_substeps={self.plant_substeps!r} must be an integer >= 1")
 
         ctrl_fields = ("proj_q_weight", "proj_w_weight", "proj_r_weight", "theta_max_deg",
                        "omega_max_deg_s", "rho", "schedule_bins", "k_damp", "enter_deg_s",
@@ -230,6 +235,8 @@ class ScenarioSpec:
                 need_default("start_mode", why="no supervisor")
         else:
             need_default(*ctrl_fields, why="no controller in this kind")
+            need_default("plant_hold", "plant_substeps",
+                         why="only tune.simulate_closed_loop_estimated takes the plant switches")
             if self.controller != "none" or self.estimator != "mekf":
                 raise ValueError(f"{self.name}: kind={self.kind!r} has no controller and no truth feedback")
         if self.kind == "estimation":
