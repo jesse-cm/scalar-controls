@@ -25,6 +25,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from scalar.control.rl_tune import THRESHOLDS, criteria  # noqa: E402
+from scalar.harness.baseline import AS_BUILT_FILE, TUNED_FILES, select_specs  # noqa: E402
 
 
 def _load(name, path):
@@ -59,9 +60,21 @@ def _home_tables(rep, scenario):
             if r.source is not None and not r.reference and r.scenario == scenario}
 
 
+# Every experiment id the harness knows (scalar/harness/baseline.py select_specs).
+_ALL_EXPERIMENTS = ("1", "2", "3", "4", "5", "6", "6L", "hw")
+
+
 def test_builds_from_the_committed_ledger(rep, ledger):
     assert rep.problems == []
-    assert [t.key for t in rep.tables] == ["A1", "A2", "A2b", "B", "C1", "C2", "D", "E", "G", "H"]
+    # F is the catch-all for names this report has not seen: it may be there or not, and is left out of
+    # the fixed order; what it must never hold is a scenario of a family the harness produces.
+    keys = [t.key for t in rep.tables]
+    assert [k for k in keys if k != "F"] == ["A1", "A1L", "A2", "A2b", "B", "C1", "C2", "D", "E", "G", "H"]
+    known = {s.name for s in select_specs(_ALL_EXPERIMENTS)}
+    assert {s.experiment for s in select_specs(_ALL_EXPERIMENTS)} >= set(_ALL_EXPERIMENTS)
+    stray = sorted({s for s, home in rep.home.items() if home == "F"
+                    and (s.split("+", 1)[0] in known or s.startswith(("s6_", "hw_")))})
+    assert stray == [], f"known scenarios in the catch-all table F: {stray}"
     assert all(t.rows and t.note for t in rep.tables)
     a = rep.accounting
     assert a["rows"] == len(ledger)
@@ -202,13 +215,30 @@ def test_a_new_switch_tag_and_a_new_scenario_show_up_without_a_code_change(tmp_p
         assert r["scenario"] in text
 
 
-def test_a_rerun_replaces_the_earlier_row(tmp_path, ledger):
+def test_a_rerun_replaces_the_earlier_row(rep, tmp_path, ledger):
     base = next(r for r in ledger if r["scenario"] == "e4D_acq120_mekf" and r["seed_set"] == "0-39")
     rerun = dict(base, git_hash="feedbee", diverged__frac="0")
     rep2 = report.build(ledger_path=_ledger_with(tmp_path, ledger, [rerun]))
     (row,) = [r for r in rep2.table("C1").rows if r.scenario == "e4D_acq120_mekf"]
     assert row.source["git_hash"] == "feedbee" and row.cells[2] == "0/40 PASS"
-    assert rep2.accounting["superseded"] == 1
+    assert rep2.accounting["superseded"] == rep.accounting["superseded"] + 1   # the ledger has reruns of its own
+    assert rep2.accounting["in_tables"] == rep.accounting["in_tables"]
+
+
+def test_longer_acquisition_rows_are_table_a1l(rep, tmp_path, ledger):
+    long_rows = {r["scenario"] for r in ledger if re.match(r"^s6_acq\d+x\d+orb_", r["scenario"])}
+    assert long_rows and all(rep.home[s] == "A1L" for s in long_rows)
+    t = rep.table("A1L")
+    assert t.columns == rep.table("A1").columns
+    orbits = {re.match(r"^s6_acq\d+x(\d+)orb_", s).group(1) for s in long_rows}
+    assert all(f"{k} orbits" in t.title for k in orbits)
+    for r in t.rows:
+        assert {c.limit_name for c in r.checks} == {"acq_diverged", "acq_settle_h"}
+    # the orbit count comes from the name, not from the code
+    src = next(r for r in ledger if r["scenario"] in long_rows)
+    name = re.sub(r"x\d+orb_", "x11orb_", src["scenario"])
+    rep2 = report.build(ledger_path=_ledger_with(tmp_path, ledger, [dict(src, scenario=name)]))
+    assert rep2.home[name] == "A1L" and "11 orbits" in rep2.table("A1L").title
 
 
 def test_missing_files_do_not_raise(tmp_path):
@@ -261,6 +291,11 @@ def test_headline_is_short_and_shows_every_tag_of_the_tuned_controller(rep, ledg
     built = {f"as built: {r['scenario'].split('_', 2)[2]}" + (" (acq)" if r["scenario"].startswith("hw_acq") else "")
              for r in ledger if r["scenario"].startswith("hw_")}
     assert built and built <= set(labels)
+    later = TUNED_FILES[TUNED_FILES.index(AS_BUILT_FILE) + 1:]       # files produced after the as-built one
+    plain = {f"no switch: {m.group(2)}" + (" (acq)" if m.group(1) == "acq" else "")
+             for r in ledger for m in [re.match(r"^s6_(acq|fine)\d+_calmag_([^+]+)$", r["scenario"])]
+             if m and m.group(2) in later}
+    assert plain and plain <= set(labels), plain - set(labels)
     assert any(line.lstrip().startswith("hardware.json:") for line in lines)
     full = report.render_terminal(rep)
     assert full.index(lines[0]) < full.index("\nA1. ")    # the headline sits on top of the tables

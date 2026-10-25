@@ -4,7 +4,7 @@
 
 ## Headline
 
-The tuned controller lqr_tuned_3mode, plain, with each switch, and as built.
+Tuned controller lqr_tuned_3mode plain, with each switch and as built; lqr_tuned_ms plain.
 
 Cell: seeds lost, mean pointing error on the typical seed [deg], verdict. Fine pointing: PASS = 0 lost and <= 5 deg; (acq) = acquisition: PASS = 0 lost. Columns: the sun front end.
 
@@ -12,6 +12,8 @@ Cell: seeds lost, mean pointing error on the typical seed [deg], verdict. Fine p
 |---|---:|---:|---:|---:|
 | `no switch` | 0/40 5.44 FAIL | - | - | - |
 | `no switch (acq)` | 5/40 6.63 FAIL | - | - | - |
+| `no switch: lqr_tuned_ms` | 0/40 5.47 FAIL | - | - | - |
+| `no switch: lqr_tuned_ms (acq)` | 0/40 6.38 PASS | - | - | - |
 | `veml25` | 37/40 83.56 FAIL | 11/40 18.76 FAIL | 0/40 9.93 FAIL | - |
 | `veml6.25` | 0/40 5.50 FAIL | 0/40 4.91 PASS | 0/40 7.36 FAIL | - |
 | `veml25_fill` | 0/40 5.69 FAIL | - | - | - |
@@ -60,9 +62,18 @@ One row per tuned file (its name in results/, without .json) and seed set. Lost 
 | seeds 100-114 (15 seeds) | lqr_tuned_3mode | calibrated | 2/15 FAIL | 5.15 PASS | never FAIL | `s6_acq120_calmag_lqr_tuned_3mode` |
 | seeds 100-114 (15 seeds) | lqr_tuned_ms | calibrated | 0/15 PASS | 5.14 PASS | never FAIL | `s6_acq120_calmag_lqr_tuned_ms` |
 
+## A1L. Tuned controllers: acquisition, longer episode (6 orbits instead of 4)
+
+The acquisition run of A1 for some of its files, run for 6 orbits instead of A1's 4 (the count is read from the scenario name); same start, parameters and plant, same columns and limits as A1. To compare with A1: 'lost' looks at the last orbit of whichever episode (orbit 6 here, orbit 4 in A1), and settle time is counted from the start of the run as the first moment after which the error is under 10 deg for at least 90 % of the rest of the run, so the added orbits can move it either way: later if they hold an excursion above 10 deg, earlier if they hold the error under it.
+
+| seeds | tuned file | magnetometer | lost pointing | settle h, typical seed | settle h, bad seed | ledger scenario |
+|---|---|---|---:|---:|---:|---|
+| seeds 0-39 (40 seeds) | lqr_tuned_3mode | calibrated | 0/40 PASS | 6.71 FAIL | 8.79 FAIL | `s6_acq120x6orb_calmag_lqr_tuned_3mode` |
+| seeds 0-39 (40 seeds) | lqr_tuned_ms | calibrated | 0/40 PASS | 6.29 FAIL | 8.75 FAIL | `s6_acq120x6orb_calmag_lqr_tuned_ms` |
+
 ## A2. Tuned controllers: fine pointing (start near the target)
 
-Same files and seeds; the second of the two runs made for each file. Mean error = pointing error in degrees, averaged over the last orbit; PASS = 5 deg or less. Lost pointing as in A1; PASS = 0 lost.
+Same files and seeds as A1; the second of the two runs made for each file. Mean error = pointing error in degrees, averaged over the last orbit; PASS = 5 deg or less. Lost pointing as in A1; PASS = 0 lost.
 
 | seeds | tuned file | magnetometer | lost pointing | mean error, typical seed | mean error, bad seed | ledger scenario |
 |---|---|---|---:|---:|---:|---|
@@ -368,15 +379,6 @@ Knowledge error = angle between estimated and true attitude, in degrees. Median 
 | position off by 100 km | MEKF, analytic sun | 1.45 | 2.54 PASS | 2.78 PASS | `e2_alongtrack_100km` |
 | position off by 300 km | MEKF, analytic sun | 4.16 | 7.20 PASS | 7.30 PASS | `e2_alongtrack_300km` |
 | position off by 1000 km | MEKF, analytic sun | 14.19 | 24.44 FAIL | 24.62 FAIL | `e2_alongtrack_1000km` |
-
-## F. Other closed-loop rows
-
-Lost pointing = seeds whose pointing error went above 90 deg in the last orbit, of the seeds run; PASS = 0 lost. Pointing error = mean over the last orbit, in degrees, on the typical and the bad seed (no limit applied here). Controller = its kind, then the settings that differ between the rows of one run.
-
-| run | attitude from | controller | lost pointing | pointing error, typical | pointing error, bad seed | ledger scenario |
-|---|---|---|---:|---:|---:|---|
-| s6_acq120x6orb_calmag_lqr_tuned_3mode; seeds 0-39 (40 seeds) | MEKF, analytic sun | three-mode | 0/40 PASS | 5.79 | 9.12 | `s6_acq120x6orb_calmag_lqr_tuned_3mode` |
-| s6_acq120x6orb_calmag_lqr_tuned_ms; seeds 0-39 (40 seeds) | MEKF, analytic sun | three-mode | 0/40 PASS | 5.93 | 8.65 | `s6_acq120x6orb_calmag_lqr_tuned_ms` |
 
 ## G. As built: the tuned controller with the values of hardware.json
 

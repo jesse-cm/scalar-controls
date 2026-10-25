@@ -12,7 +12,8 @@ every pytest run (conftest.py at the repository root).
 
 Where a ledger row goes (``build`` below; ``tests/test_report.py`` holds it to this):
 
-    A1, A2   scenario ``s6_acq*`` / ``s6_fine*``: the tuned controllers (experiment 6)
+    A1, A2   scenario ``s6_acq<n>_*`` / ``s6_fine<n>_*``: the tuned controllers (experiment 6)
+    A1L      scenario ``s6_acq<n>x<k>orb_*``: their acquisition run for k orbits (experiment 6L)
     B        scenario ``<base>+<tag>``: a fidelity switch, next to the ``<base>`` row with it off
     C1, C2   the other closed-loop scenarios of experiments 4 and 5
     E        scenarios with a knowledge error and no controller
@@ -23,7 +24,9 @@ Where a ledger row goes (``build`` below; ``tests/test_report.py`` holds it to t
     H        is not from the ledger: every entry of hardware.json
 
 The headline at the top (``_headline``; the pytest hook prints only it) is one line per
-``+tag`` of the tuned three-mode controller and per as-built row, computed from the same rows.
+``+tag`` of the tuned three-mode controller and per as-built row, plus the plain lines of every
+tuned file produced after it (``baseline.TUNED_FILES`` order) with calibrated-magnetometer rows,
+computed from the same rows.
 
 A new ``+tag`` or a new scenario name needs no change here; ``_FAMILY_WORDS``,
 ``_SCENARIO_WORDS`` and the other word tables only supply nicer labels.
@@ -47,7 +50,7 @@ if ROOT not in sys.path:
 
 from scalar import hardware  # noqa: E402
 from scalar.control.rl_tune import THRESHOLDS  # noqa: E402
-from scalar.harness.baseline import AS_BUILT_FILE, baseline_specs  # noqa: E402
+from scalar.harness.baseline import AS_BUILT_FILE, TUNED_FILES, baseline_specs, rl_tune_specs  # noqa: E402
 from scalar.harness.ledger import METRIC_COLUMNS, parse_seed_set, read_ledger  # noqa: E402
 from scalar.harness.metrics import pointing_stats  # noqa: E402
 
@@ -305,6 +308,33 @@ def _select(rows):
     return shown, left_out
 
 
+def _acq_cells(r, stem, magw):
+    """The A1 / A1L cells of one acquisition row: file, magnetometer, lost, settle typical, settle bad."""
+    lost, c0 = _lost_cell(r, "acq_diverged")
+    typ, c1 = _limit_cell(r, "acq_settle_h", "med", never="never")
+    bad, c2 = _limit_cell(r, "acq_settle_h", "p95", never="never")
+    return [stem, magw, lost, typ, bad], _checks(c0, c1, c2)
+
+
+def _long_acq_words(table, orbits, defs):
+    """Title and note of A1L, once its rows are in: the orbit counts come from the scenario names."""
+    n_a1 = inspect.signature(rl_tune_specs).parameters["n_orbits_acq"].default
+    k = " or ".join(_g(o) for o in sorted(orbits))
+    table.title = f"Tuned controllers: acquisition, longer episode ({k} orbits instead of {_g(n_a1)})"
+    if len(orbits) > 1:
+        table.title += "; the orbit count is in each group heading"
+    thr = _g(defs["settle_thresh_deg"])
+    table.note = (
+        f"The acquisition run of A1 for some of its files, run for {k} orbits instead of A1's {_g(n_a1)} "
+        f"(the count is read from the scenario name); same start, parameters and plant, same columns "
+        f"and limits as A1. To compare with A1: 'lost' looks at the last orbit of whichever episode "
+        f"(orbit {k} here, orbit {_g(n_a1)} in A1), and settle time is counted from the start of the run "
+        f"as the first moment after which the error is under {thr} deg for at least "
+        f"{_g(100 * defs['settle_hold'])} % of the rest of the run, so the added orbits can move it "
+        f"either way: later if they hold an excursion above {thr} deg, earlier if they hold the error "
+        f"under it.")
+
+
 def _tuned_tables(rows, defs):
     a1 = Table("A1", "Tuned controllers: acquisition (start far from the target, tumbling)",
                f"One row per tuned file (its name in results/, without .json) and seed set. Lost "
@@ -314,8 +344,9 @@ def _tuned_tables(rows, defs):
                f"it did not; PASS = {_g(THRESHOLDS['acq_settle_h'])} h or less.",
                ["tuned file", "magnetometer", "lost\npointing", "settle h,\ntypical\nseed", "settle h,\nbad seed"],
                align="llrrr", group_name="seeds")
+    a1l = Table("A1L", "", "", list(a1.columns), align=a1.align, group_name="seeds")
     a2 = Table("A2", "Tuned controllers: fine pointing (start near the target)",
-               f"Same files and seeds; the second of the two runs made for each file. Mean error = pointing error in degrees, averaged "
+               f"Same files and seeds as A1; the second of the two runs made for each file. Mean error = pointing error in degrees, averaged "
                f"over the last orbit; PASS = {_g(THRESHOLDS['fine_point_mean'])} deg or less. Lost "
                f"pointing as in A1; PASS = {_g(THRESHOLDS['fine_diverged'])} lost.",
                ["tuned file", "magnetometer", "lost\npointing", "mean error,\ntypical\nseed",
@@ -333,20 +364,23 @@ def _tuned_tables(rows, defs):
     left = []
     parsed = []
     for r in rows:
-        m = re.match(r"^s6_(acq|fine)\d+_([a-z]+mag)_(.+)$", r["scenario"])
-        if m:
+        m = re.match(r"^s6_(acq|fine)\d+(?:x(\d+(?:\.\d+)?)orb)?_([a-z]+mag)_(.+)$", r["scenario"])
+        if m and not (m.group(2) and m.group(1) == "fine"):      # a longer fine episode has no table
             parsed.append((r, *m.groups()))
         else:
             left.append(r)
     seed_order = list(dict.fromkeys(r["seed_set"] for r, *_ in parsed))
     parsed.sort(key=lambda p: seed_order.index(p[0]["seed_set"]))            # stable: file order kept
-    for r, episode, mag, stem in parsed:
+    orbits = {float(p[2]) for p in parsed if p[2]}
+    for r, episode, orb, mag, stem in parsed:
         group, magw = _seeds_words(r), _MAG_WORDS.get(mag, mag)
-        if episode == "acq":
-            lost, c0 = _lost_cell(r, "acq_diverged")
-            typ, c1 = _limit_cell(r, "acq_settle_h", "med", never="never")
-            bad, c2 = _limit_cell(r, "acq_settle_h", "p95", never="never")
-            a1.rows.append(Row([stem, magw, lost, typ, bad], r["scenario"], group, _checks(c0, c1, c2), source=r))
+        if orb:
+            cells, checks = _acq_cells(r, stem, magw)
+            group = f"{_g(float(orb))} orbits, {group}" if len(orbits) > 1 else group
+            a1l.rows.append(Row(cells, r["scenario"], group, checks, source=r))
+        elif episode == "acq":
+            cells, checks = _acq_cells(r, stem, magw)
+            a1.rows.append(Row(cells, r["scenario"], group, checks, source=r))
         else:
             lost, c0 = _lost_cell(r, "fine_diverged")
             typ, c1 = _limit_cell(r, "fine_point_mean", "med", _deg)
@@ -357,7 +391,9 @@ def _tuned_tables(rows, defs):
             sat, c5 = _limit_cell(r, "fine_sat_frac", "p95", lambda v: _num(100 * v))
             pwr, c6 = _limit_cell(r, "fine_power_w", "p95")
             a2b.rows.append(Row([stem, p95, rate, sat, pwr], r["scenario"], group, _checks(c3, c4, c5, c6), source=r))
-    return [t for t in (a1, a2, a2b) if t.rows], left
+    if a1l.rows:
+        _long_acq_words(a1l, orbits, defs)
+    return [t for t in (a1, a1l, a2, a2b) if t.rows], left
 
 
 def _switch_parts(scenario):
@@ -666,9 +702,11 @@ def _headline_cell(row, episode):
 
 
 def _headline(rows, counts):
-    """The short summary at the top: the tuned three-mode controller with no switch on, then one line per
-    ``+tag`` it has rows for, then the as-built rows; columns = the estimator's sun front end.
-    Per (line, front end) the row with the most seeds is shown (the latest when tied)."""
+    """The short summary at the top: the tuned three-mode controller with no switch on, then the same for
+    every tuned file produced after it (later in baseline.TUNED_FILES) that has calibrated-magnetometer
+    rows, then one line per ``+tag`` of the three-mode controller, then the as-built rows; columns = the
+    estimator's sun front end. Per (line, front end) the row with the most seeds is shown (the latest
+    when tied)."""
     pat = re.compile(r"^s6_(acq|fine)\d+_([a-z]+mag)_" + re.escape(AS_BUILT_FILE) + r"(?:\+(.+))?$")
     cells, labels, fronts = {}, [], []
 
@@ -685,20 +723,32 @@ def _headline(rows, counts):
 
     tuned = [(m, r) for r in rows for m in [pat.match(r["scenario"])] if m]
     mags = {m.group(2) for m, _ in tuned}
+    later = TUNED_FILES[TUNED_FILES.index(AS_BUILT_FILE) + 1:] if AS_BUILT_FILE in TUNED_FILES else ()
+    others = [(m, r) for r in rows for m in [re.match(r"^s6_(acq|fine)\d+_calmag_([^+]+)$", r["scenario"])]
+              if m and m.group(2) in later]
     for m, r in sorted(tuned, key=lambda mr: (mr[0].group(3) is not None, mr[0].group(1) == "acq")):
         episode, mag, tag = m.groups()
-        label = (tag or "no switch") + (f" {_MAG_WORDS.get(mag, mag)}" if len(mags) > 1 else "")
-        put(label, episode, r)
+        if tag is None:
+            put("no switch" + (f" {_MAG_WORDS.get(mag, mag)}" if len(mags) > 1 else ""), episode, r)
+    for m, r in sorted(others, key=lambda mr: (later.index(mr[0].group(2)), mr[0].group(1) == "acq")):
+        put(f"no switch: {m.group(2)}", m.group(1), r)
+    for m, r in sorted(tuned, key=lambda mr: mr[0].group(1) == "acq"):
+        episode, mag, tag = m.groups()
+        if tag is not None:
+            put(tag + (f" {_MAG_WORDS.get(mag, mag)}" if len(mags) > 1 else ""), episode, r)
     built = [(m, r) for r in rows for m in [re.match(r"^hw_(acq|fine)\d+_(.+)$", r["scenario"])] if m]
     for m, r in sorted(built, key=lambda mr: mr[0].group(1) == "acq"):
         put(f"as built: {m.group(2)}", m.group(1), r)
     order = {lab: i for i, lab in enumerate(labels)}
-    labels.sort(key=lambda lab: (order[lab.replace(" (acq)", "")] if lab.endswith(" (acq)") else order[lab],
-                                 lab.endswith(" (acq)")))
+    labels.sort(key=lambda lab: (order.get(lab[:-len(" (acq)")], order[lab]) if lab.endswith(" (acq)")
+                                 else order[lab], lab.endswith(" (acq)")))
     hw = ("hardware.json could not be read" if counts is None else
           f"hardware.json: {counts['entries']} inputs, " + ", ".join(f"{counts[k]} {k}" for k in hardware.SOURCES)
           + f" ({counts['null']} null): table H")
-    return {"title": f"Headline: the tuned controller {AS_BUILT_FILE}, plain, with each switch, and as built",
+    plain_others = [f for f in later if any(m.group(2) == f for m, _ in others)]
+    return {"title": (f"Headline: tuned controller {AS_BUILT_FILE} plain, with each switch and as built; "
+                      f"{', '.join(plain_others)} plain" if plain_others else
+                      f"Headline: the tuned controller {AS_BUILT_FILE}, plain, with each switch, and as built"),
             "note": (f"Cell: seeds lost, mean pointing error on the typical seed [deg], verdict. Fine pointing: "
                      f"PASS = {_g(THRESHOLDS['fine_diverged'])} lost and <= {_g(THRESHOLDS['fine_point_mean'])} deg; "
                      f"(acq) = acquisition: PASS = {_g(THRESHOLDS['acq_diverged'])} lost. "
