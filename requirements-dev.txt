@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest>=7
+torch>=2.0    # only for the sun-sensor network (scalar/learning/sun_mlp.py); CPU build is enough
+# bsk (Basilisk) is needed only for scripts/crosscheck_basilisk.py: pip install bsk

@@ -22,7 +22,7 @@ One line per item, with where it is discussed. Paths in backticks are from the r
 The plant is the simulated spacecraft and its coils.
 
 - The true attitude is moved forward with a low-order step whose error grows with rotation rate and step size; the plant substeps reduce it, they do not remove it ([discrepancy C](crosscheck-basilisk.md#c-truth-attitude-is-advanced-with-a-second-order-step--ours-numerical)).
-- The plant holds the coil dipole over each control step, in two substeps, so the torque follows the field as in a real coil; the old step, which held the torque, is kept only for the runs that reproduce the notes ([discrepancy D](crosscheck-basilisk.md#d-the-plant-freezes-the-torque-for-a-whole-control-step--ours-physical), [plant-step row](verification-loop-plan.md#2026-10-24--phase-1-plant-step-row-added-after-the-cross-check)). <!-- verify after p2-bugs -->
+- By default the plant still holds the torque fixed over each control step; in a real coil the dipole is held and the torque follows the field. The corrected step (dipole held, two substeps) exists as a switch, is used by the as-built rows, and is being made the default ([discrepancy D](crosscheck-basilisk.md#d-the-plant-freezes-the-torque-for-a-whole-control-step--ours-physical), [plant-step row](verification-loop-plan.md#2026-10-24--phase-1-plant-step-row-added-after-the-cross-check)). <!-- verify after p2-bugs -->
 - No coil electrical behaviour, no coil field at the magnetometer, no measure-then-torque cycle in `scalar/` ([plan row 1d](verification-loop-plan.md#phase-1--fidelity-parallel-agents-each-independent-each-one-switch), not started; [magnetorquer-defects.md](magnetorquer-defects.md)).
 - No temperature effects other than the gyro and magnetometer offset drift (table B, off by default).
 - Coil saturation was never reached in the cross-check, so that path is unchecked against Basilisk ([not covered](crosscheck-basilisk.md#not-covered)).
@@ -46,7 +46,7 @@ The plant is the simulated spacecraft and its coils.
 
 ### How results are measured
 
-- Knowledge and pointing error are recorded at matching instants; ledger rows made before that fix have the estimate one step late, which inflates knowledge error at high rotation rates ([plan, Open](verification-loop-plan.md#open)). <!-- verify after p2-bugs -->
+- Knowledge and pointing error are recorded one step late (the estimate at one instant against the truth one step later), which inflates knowledge error at high rotation rates; a fix is in progress ([plan, Open](verification-loop-plan.md#open)). <!-- verify after p2-bugs -->
 - A lost-seed count from 40 seeds is a rate with a wide spread: a tiny plant change reshuffles which seeds are lost ([plant-step row](verification-loop-plan.md#2026-10-24--phase-1-plant-step-row-added-after-the-cross-check)).
 - Rows made on the laptop and on the cluster are not digit-identical, and the ledger has no column saying which is which; compare lost-seed counts and acquisition figures only within one platform ([where runs are made](verification-loop-plan.md#2026-10-24--where-runs-are-made-and-what-that-does-to-the-rows)).
 - The two acquisition measures (lost flag, settle time) overlap and both depend on the run length; the settle limit cannot be judged until they use a fixed window ([plan, Open](verification-loop-plan.md#open), [eight-seed entry](verification-loop-plan.md#2026-10-24--tuning-on-eight-seeds-resultslqr_tuned_msjson)).
