@@ -77,6 +77,22 @@ def test_shipped_values_are_the_code_defaults():
     assert np.array_equal(v("sun_sensor", "gains"), veml.gains)
     assert v("sun_sensor", "dark_offset") == veml.dark_counts
     assert v("sun_sensor", "noise") == SunSensorArray().noise_frac
+    # the mission numbers are the orbit and start date of every closed-loop run (spec and plant defaults)
+    from scalar.harness.spec import ScenarioSpec
+    spec, plant = ScenarioSpec(name="x"), default_plant()
+    assert v("mission", "altitude") * 1e3 == spec.altitude_m
+    assert v("mission", "inclination") == spec.inclination_deg == plant.inclination_deg
+    assert v("mission", "raan") == spec.raan_deg
+    assert hardware._epoch_tuple(v("mission", "epoch")) == spec.epoch
+    assert hardware._epoch_tuple(v("mission", "epoch")) == plant.epoch.timetuple()[:6]
+
+
+def test_not_in_file_names_real_files():
+    """Each reason in NOT_IN_FILE that names a file of this repo names one that exists."""
+    import re
+    for item, why in hardware.NOT_IN_FILE:
+        for path in re.findall(r"(?:scalar|scripts)/[\w/]+\.py", item + " " + why):
+            assert os.path.isfile(os.path.join(ROOT, path)), (item, path)
 
 
 # ------------------------------------------------------------------ mistakes
@@ -126,6 +142,11 @@ MISTAKES = [   # (id, edit, words the message must contain)
     ("swing and log", _swing_and_log, ["board_temperature.log_csv", "replaces the swing"]),
     ("phase alone", _set("board_temperature", "swing_amplitude", "value", None),
      ["board_temperature.swing_phase", "nothing to phase"]),
+    ("date format", _set("mission", "epoch", "value", "2026-09-11 12:00"), ["mission.epoch", "YYYY-MM-DDTHH:MM:SS"]),
+    ("date as numbers", _set("mission", "epoch", "value", [2026, 9, 11, 12, 0, 0]), ["mission.epoch", "YYYY-MM-DDTHH:MM:SS"]),
+    ("inclination", _set("mission", "inclination", "value", 198.6), ["mission.inclination", "between 0 and 180"]),
+    ("altitude", _set("mission", "altitude", "value", -550.0), ["mission.altitude", "> 0"]),
+    ("altitude in m", _set("mission", "altitude", "units", "m"), ["mission.altitude", "'km'", "convert"]),
 ]
 
 
@@ -236,11 +257,16 @@ def test_editing_the_file_changes_the_as_built_specs_only(tmp_path, monkeypatch)
     def edit(d):
         d["gyro"]["lsb"].update(value=0.0175, source="measured")
         d["body"]["residual_dipole"]["value"] = [0.001, 0.0, 0.0]
+        d["mission"]["inclination"]["value"] = 97.5
+        d["mission"]["epoch"]["value"] = "2027-03-01T06:30:00"
     path = _edited(tmp_path, edit)
     after_hw = baseline.as_built_specs(path)
     assert after_hw != before_hw
     by = {s.name: s for s in after_hw}
     assert by["hw_fine20_all"].gyro_quant_deg_s == 0.0175 and by["hw_fine20_all"].m_res == (0.001, 0.0, 0.0)
+    assert by["hw_acq120_all"].inclination_deg == 97.5 and by["hw_acq120_all"].epoch == (2027, 3, 1, 6, 30, 0)
+    from scalar.harness import runner
+    assert runner._plant(by["hw_acq120_all"]).inclination_deg == 97.5     # the controller is designed on it too
     assert by["hw_fine20_not_assumed"].gyro_quant_deg_s == 0.0175            # measured: in both variants
     assert by["hw_fine20_not_assumed"].m_res == baseline.tuned_controller_specs()[1].m_res   # assumed: not
 
@@ -277,6 +303,10 @@ def test_as_built_specs_are_experiment_6_plus_the_file():
     allf = hardware.as_built_fields(hw)[0]
     assert allf["gyro_noise_density"] == 3.8e-3 * DEG and allf["veml_integration_ms"] == 25
     assert allf["gyro_temp_amp_K"] == allf["mag_temp_amp_K"] == 15.0
+    # the mission numbers, while assumed, give exactly the experiment-6 orbit and start date
+    assert (allf["altitude_m"], allf["inclination_deg"], allf["raan_deg"], allf["epoch"]) == (
+        fine.altitude_m, fine.inclination_deg, fine.raan_deg, fine.epoch)
+    assert all(type(x) is int for x in allf["epoch"])
 
 
 def test_a_temperature_log_replaces_the_swing(tmp_path):

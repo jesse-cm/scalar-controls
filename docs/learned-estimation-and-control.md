@@ -64,6 +64,11 @@ along-track position error in the estimator's reference field, 550 km /
 | 300 km | 40 s | 4.5° | 4.2° | 7.3° |
 | 1000 km | 132 s | 15° | 14° | 25° |
 
+> **Correction, added 2026-10-24.** The 100 km row's p95 does not reproduce.
+> The harness, at the seed this script uses, gives 2.65°, against 2.7° in the
+> table. The rest of the table reproduces. See the
+> [phase 0 entry of the plan's Status](verification-loop-plan.md#2026-10-24--phase-0-harness-done).
+
 So: a TLE a week old (few km) and an RTC within ~5 s are fine. Attitude error
 tracks field-direction error roughly 1:1 beyond 50 km. Sun-direction error
 from clock error is ~1°/day, negligible.
@@ -96,6 +101,11 @@ an identification pulse. Ninety 2 s pulses (15 min) recover X/Y to 2–3 %, Z to
 Implication for A9: sample at ≥ 5 Hz so the windows can be placed, but
 command 2 s pulses for the identification campaign.
 
+> **Correction, added 2026-10-24.** "To ~0.3 mA m^2" for the residual dipole
+> does not hold at the seed this script uses: the harness recovers it to
+> 0.59 mA m^2. The claim is worded too loosely to score as pass or fail. See
+> the [phase 0 entry of the plan's Status](verification-loop-plan.md#2026-10-24--phase-0-harness-done).
+
 ## 4. LQR parameters that point
 
 `scripts/lqr_tune.py`, `scalar/control/periodic_lqr.py`, `scalar/control/tune.py`
@@ -113,6 +123,12 @@ Two findings about the existing `lqr.py`:
   ⊥B projection ends at 90–110° from a 120° start, and a low-gain
   averaging-theory PD is out-muscled by a 2.3 mA m^2 residual dipole.
 
+  > **Correction, added 2026-10-24.** "90–110°" is not the whole range. Of
+  > the four weight sets this script draws, one ends at 89.11°, just under
+  > 90°; the other three end between 91.4° and 107.9° (scoreboard table C2).
+  > The conclusion, that the projected LQR does not point, stands. See the
+  > [phase 0 entry of the plan's Status](verification-loop-plan.md#2026-10-24--phase-0-harness-done).
+
 What works: **periodic LQR** — the field is inside the Riccati design; dipole
 is the input; a gain schedule K(orbit phase) is the output.
 
@@ -126,6 +142,11 @@ Rate damping (m = k ω×B, the gyro form of B-dot) until 0.3°/s, then the
 schedule: settles to <10° in 3.1–4.8 h and holds 0.2–0.5°. This two-mode
 supervisor is the C-26 structure — DetumbleManager as mode 1, pointing law as
 mode 2.
+
+> **Correction, added 2026-10-24.** "Rates to 20°/s" understates the rates.
+> The three schedule-alone runs (rho 0.1, 0.3 and 1) reach top rates of 21.1
+> to 28.9°/s. The claim is worded too loosely to score as pass or fail. See
+> the [phase 0 entry of the plan's Status](verification-loop-plan.md#2026-10-24--phase-0-harness-done).
 
 With the MEKF in the loop at 1 Hz, ideal sensors: 3.0° mean, 8° p95, knowledge
 0.6°. The 1 Hz loop chatters at full dipole on Y in fine pointing

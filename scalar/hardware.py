@@ -1,10 +1,13 @@
 """Hardware inputs: ``hardware.json`` at the repository root, read and checked.
 
-One file holds every hardware number a bench test can replace. Each entry is
+One file holds every hardware number a bench test, a CAD model or a datasheet
+check can replace, and the mission numbers (orbit, start date) a mission
+decision will replace. Each entry is
 
     {"value": ..., "units": "...", "source": "assumed" | "datasheet" | "measured", "note": "..."}
 
-grouped by device (``SCHEMA`` below lists every entry, its units and its shape).
+grouped by device, with the mission numbers in a group of their own
+(``SCHEMA`` below lists every entry, its units and its shape).
 ``value`` null means unknown: the entry is not applied and the code's own
 default stands. The units of an entry are fixed: a bench result in other units
 is converted before it is typed in, and a units string that differs from
@@ -16,12 +19,14 @@ entry, a missing or extra field, a wrong shape, a number that is not finite, a
 ``source`` that is not one of the three words, a units string that does not
 match, or a value outside what the entry can be (a negative noise level, an
 integration time the VEML6031 does not have, an inertia that is not symmetric
-positive definite, an unreadable temperature log).
+positive definite, an unreadable temperature log, a date that is not
+YYYY-MM-DDTHH:MM:SS).
 
 WHO READS IT
     as_built_fields()     the ScenarioSpec fields of the as-built rows (scalar/harness/baseline.py,
                           experiment "hw"): every applicable entry, or only those whose source is
-                          not "assumed"
+                          not "assumed". The mission entries set the as-built rows' orbit
+                          and start date; every other experiment keeps its own.
     temperature_fields()  the board-temperature fields, also used by scripts/gyro_realism.py and
                           scripts/mag_realism.py
     Hardware.require()    one value, for the realism scripts (scripts/*_realism.py)
@@ -33,6 +38,7 @@ WHAT IS NOT IN THE FILE, and why: see ``NOT_IN_FILE``.
 from __future__ import annotations
 
 import csv
+import datetime as _dt
 import json
 import math
 import os
@@ -55,7 +61,8 @@ FIELDS = ("value", "units", "source", "note")
 ABOUT = "about"                 # optional top-level key: free text (a string or a list of strings)
 
 # device -> entry -> (units, shape). Shape: () one number, (n,) n numbers, (n, m) n rows of m numbers,
-# "int" a whole number >= 0, "path" a file path (relative to the folder of the JSON file).
+# "int" a whole number >= 0, "path" a file path (relative to the folder of the JSON file),
+# "datetime" a UTC date and time written YYYY-MM-DDTHH:MM:SS.
 SCHEMA = OrderedDict([
     ("gyro", OrderedDict([
         ("noise_density", ("deg/s/sqrt(Hz)", ())),
@@ -95,7 +102,15 @@ SCHEMA = OrderedDict([
         ("inertia", ("kg m^2", (3, 3))),
         ("residual_dipole", ("A m^2", (3,))),
     ])),
+    # not a device: the orbit and start date, fixed by the launch, not by a bench test
+    ("mission", OrderedDict([
+        ("altitude", ("km", ())),
+        ("inclination", ("deg", ())),
+        ("raan", ("deg", ())),
+        ("epoch", ("UTC", "datetime")),
+    ])),
 ])
+DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%S"     # mission.epoch, e.g. 2026-09-11T12:00:00
 
 # Entry -> (ScenarioSpec field, conversion from the file's units to the field's). The as-built
 # rows set these; the temperature entries go through temperature_fields().
@@ -119,6 +134,10 @@ _SPEC_FIELD = OrderedDict([
     ("coils.max_current", ("coil_i_max", None)),
     ("body.inertia", ("inertia", None)),
     ("body.residual_dipole", ("m_res", None)),
+    ("mission.altitude", ("altitude_m", lambda v: v * 1e3)),
+    ("mission.inclination", ("inclination_deg", None)),
+    ("mission.raan", ("raan_deg", None)),
+    ("mission.epoch", ("epoch", lambda v: _epoch_tuple(v))),
 ])
 # Entries in the file that the as-built rows do not apply, and why.
 _STUDY_ONLY = {
@@ -128,17 +147,23 @@ _STUDY_ONLY = {
                                      "the as-built rows fly sun_sensor.normals",
 }
 
-# Hardware numbers in the code that have no entry, and why (reported, not read).
+# Hardware numbers in the code that have no entry, and why (reported, not read). README sections 4
+# (where each number lives) and 5 (what the estimator does not do with the file) name each of these;
+# keep them in step.
 NOT_IN_FILE = (
     ("coupling of coil current and radio into the magnetometer (phase-5 bench item)",
      "no model of it in scalar/; adding one is a change to sensor physics"),
-    ("VEML6031 lux ceiling per integration time (MAX_LUX_G05_PD4, datasheet Table 10)",
+    ("VEML6031 lux ceiling per integration time (MAX_LUX_G05_PD4, datasheet Table 10), and the "
+     "gain x0.5 / photodiode 1/4 setting it belongs to",
      "a datasheet table in scalar/sensors/veml6031.py; the as-built rows choose from it through "
-     "sun_sensor.integration_time"),
+     "sun_sensor.integration_time. Only that one gain setting's column is coded: another gain is a "
+     "code change"),
     ("the flight-like photodiode cube of experiments 1 and 5 (gain spread, roll-off, tilt)",
-     "a model of a generic cube, not of the VEML6031 array the spacecraft flies"),
+     "a model of a generic cube, not of the VEML6031 array the spacecraft flies "
+     "(scalar/learning/sun_mlp.py flight_like_sensor)"),
     ("SunSensorArray responsivity, area, dark floor, validity gate",
-     "scale factors of the generic cube; the VEML6031 model does not use them"),
+     "scale factors of the generic cube (scalar/sensors/sun_sensor.py); the VEML6031 model does not "
+     "use them"),
     ("calibration of the gyro scale factor and misalignment from bench values",
      "a bench value enters as an uncorrected sensor error; correcting it in the estimator is a "
      "change to estimator code"),
@@ -146,11 +171,23 @@ NOT_IN_FILE = (
      "measured normals enter the truth only; the analytic reconstruction still assumes "
      "veml6031.VEML6031_NORMALS (scalar/harness/spec.py, sun_array notes)"),
     ("MEKF noise settings matched to measured sensor noise",
-     "the closed loop builds its own MEKF with fixed settings (scalar/control/tune.py)"),
+     "filter settings, not hardware (scalar/estimator/mekf.py MEKF defaults); the closed loop builds "
+     "its own MEKF with fixed settings (scalar/control/tune.py)"),
+    ("coil drive voltage (3.3 V)",
+     "already inside coils.max_current (voltage over coil resistance); the coil-power metric has its "
+     "own copy (scalar/harness/metrics.py COIL_VOLTAGE, scalar/control/rl_tune.py evaluate)"),
+    ("sensor, estimator and control rate (1 Hz)",
+     "a flight-software setting, not a hardware number (ScenarioSpec.dt in scalar/harness/spec.py)"),
+    ("star tracker accuracy and keep-out angles",
+     "SCALAR flies no star tracker; scalar/sensors/star_tracker.py serves only the ground "
+     "calibration comparison (scripts/calibration_compare.py)"),
+    ("the two-rods-and-one-coil actuator set",
+     "an early demonstration set that no source matches (scalar/control/lqr.py, "
+     "scripts/detumble_lqr.py); every later study uses the coils entries"),
 )
 
 _POSITIVE = {"gyro.noise_density", "gyro.lsb", "magnetometer.noise_std", "magnetometer.lsb",
-             "sun_sensor.noise", "coils.max_current", "sun_sensor.gains"}
+             "sun_sensor.noise", "coils.max_current", "sun_sensor.gains", "mission.altitude"}
 _NON_NEGATIVE = {"gyro.bias_random_walk", "sun_sensor.dark_offset", "sun_sensor.mounting_tilt_sigma",
                  "board_temperature.swing_amplitude"}
 VEML_INTEGRATION_MS = (400, 200, 100, 50, 25, 12.5, 6.25)    # veml6031.MAX_LUX_G05_PD4 keys
@@ -164,7 +201,7 @@ class HardwareFileError(ValueError):
 class Entry:
     device: str
     name: str
-    value: Any                  # None, float, int, str (a path), or tuples of floats
+    value: Any                  # None, float, int, str (a path or a date), or tuples of floats
     units: str
     source: str
     note: str
@@ -286,6 +323,12 @@ def _check_entry(path, key, value, units, source, note, shape, want_units):
         if not isinstance(value, str) or not value.strip():
             _fail(path, key, f"expected a file path (text), got {json.dumps(value)}")
         return value
+    if shape == "datetime":
+        try:
+            _dt.datetime.strptime(value, DATETIME_FORMAT)
+        except (TypeError, ValueError):
+            _fail(path, key, f"expected a UTC date and time written YYYY-MM-DDTHH:MM:SS, got {json.dumps(value)}")
+        return value
     v = _shaped(path, key, value, shape)
     flat = np.ravel(np.array(v, float))
     if key in _POSITIVE and not np.all(flat > 0):
@@ -303,7 +346,15 @@ def _check_entry(path, key, value, units, source, note, shape, want_units):
             _fail(path, key, "an inertia matrix must be symmetric with all principal moments > 0")
     if key in ("coils.dipole_per_amp", "magnetometer.soft_iron") and abs(np.linalg.det(np.array(v))) < 1e-12:
         _fail(path, key, "the matrix is singular")
+    if key == "mission.inclination" and not 0.0 <= v <= 180.0:
+        _fail(path, key, f"an inclination is between 0 and 180 deg, got {json.dumps(value)}")
     return v
+
+
+def _epoch_tuple(text):
+    """'2026-09-11T12:00:00' -> (2026, 9, 11, 12, 0, 0), the form of ScenarioSpec.epoch."""
+    d = _dt.datetime.strptime(text, DATETIME_FORMAT)
+    return (d.year, d.month, d.day, d.hour, d.minute, d.second)
 
 
 def load(path=None):

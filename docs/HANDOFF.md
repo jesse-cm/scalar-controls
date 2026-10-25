@@ -21,7 +21,9 @@ simulation: nothing is flight software, nothing has been run on hardware, and
 several inputs are assumed rather than measured (see
 [Open items](#open-items-that-need-hardware-or-a-decision)).
 Every hardware number, with its source, and where bench results are typed
-in: [`hardware.json`](../hardware.json) ([README, section 1](../README.md#1-working-with-the-code)).
+in: [`hardware.json`](../hardware.json) ([README, section 1](../README.md#1-working-with-the-code));
+the hardware numbers that are not in it, and where they live:
+[README, section 4](../README.md#4-hardware-numbers-and-other-inputs).
 
 ## Where things are
 
@@ -133,7 +135,7 @@ From the repository root:
 
 ```bash
 pip install -r requirements.txt
-pip install pytest torch
+pip install -r requirements-dev.txt
 python3 -m pytest tests -q
 python3 scripts/report.py
 python3 scripts/run_mekf.py
@@ -141,8 +143,8 @@ python3 scripts/lqr_tune.py
 python3 scripts/verify_controller.py results/lqr_tuned_3mode.json
 ```
 
-The first two lines install the packages; `pytest` and `torch` are not in
-`requirements.txt`. The third runs the tests. The fourth prints the results
+The first two lines install the packages; `pytest` and `torch` are in
+`requirements-dev.txt`. The third runs the tests. The fourth prints the results
 scoreboard: every result row in `results/ledger.csv` as a table, with PASS or
 FAIL against its limit, under a short headline; it runs no simulation, and the
 test run ends with the headline. Then: one determination run, the
@@ -200,8 +202,9 @@ Assumed, not known:
   [section 12](learned-estimation-and-control.md#12-the-real-sun-sensor-veml6031-counts-and-saturation-2026-10-24)
 - the hardware list the runs are built on, and what is disputed in it:
   [What the hardware actually is](learned-estimation-and-control.md#what-the-hardware-actually-is)
-- what the simulation leaves out:
-  [README](../README.md#5-limitations)
+- what the simulation leaves out, every known open problem, and the
+  decisions not yet made:
+  [README, section 5](../README.md#5-limitations)
 
 How the conclusions are meant to be checked:
 [verification-loop-plan.md](verification-loop-plan.md).

@@ -1,11 +1,12 @@
 {
   "about": [
-    "Hardware inputs of the simulation: one entry per number, grouped by device. Bench results go here.",
+    "Hardware inputs of the simulation: one entry per number, grouped by device, plus the mission numbers (orbit, start date). Bench results go here.",
     "Each entry: value (null = unknown, not applied), units (fixed per entry; convert the number, not the units),",
     "source (assumed | datasheet | measured), note (where the number comes from, or which bench test replaces it).",
     "Checked by scalar/hardware.py. Used by the as-built rows (python3 scripts/matrix.py --experiments hw) and by",
     "scripts/gyro_realism.py, mag_realism.py, sun_realism.py. The reference runs (experiments 1-6, --gate) never read it.",
-    "After editing: python3 -m pytest tests/test_hardware.py -q, then rerun the as-built rows, then python3 scripts/report.py --write."
+    "After editing: python3 -m pytest tests/test_hardware.py -q, then rerun the as-built rows, then python3 scripts/report.py --write.",
+    "Hardware numbers that are not in this file, where they live and why: README section 4."
   ],
   "gyro": {
     "noise_density": {
@@ -152,7 +153,7 @@
       "value": [[0.45792, 0.0, 0.0], [0.0, 0.45792, 0.0], [0.0, 0.0, 0.3979898241421668]],
       "units": "A m^2/A",
       "source": "assumed",
-      "note": "Dipole per amp, column j = channel j. Computed from the S3 coil geometry (turns x area, air core) in scalar/sysid/magnetorquer_id.py lines 164-178; no source confirms the coil set (README section 4). Replaced by a coil measurement (or the in-flight burst identification, notes section 3)."
+      "note": "Dipole per amp, column j = channel j. Computed from the S3 coil geometry (turns x area, air core) in scalar/sysid/magnetorquer_id.py lines 164-178; no source confirms the coil set (README section 5, decisions not yet made). Replaced by a coil measurement (or the in-flight burst identification, notes section 3)."
     },
     "max_current": {
       "value": [0.12692307692307692, 0.12692307692307692, 0.021897810218978103],
@@ -173,6 +174,32 @@
       "units": "A m^2",
       "source": "assumed",
       "note": "Residual magnetic dipole of the spacecraft, coils off (scalar/control/rl_tune.py line 74). Replaced by a magnetic-cleanliness measurement of the assembled unit."
+    }
+  },
+  "mission": {
+    "altitude": {
+      "value": 550.0,
+      "units": "km",
+      "source": "assumed",
+      "note": "Circular orbit altitude: ScenarioSpec default (scalar/harness/spec.py line 42) and CircularOrbit default (scalar/environment/orbit.py line 49), whose docstring (line 3) calls 550 km a design point chosen to stress eclipse, not SCALAR's orbit. Replaced by the orbit the launch provides. Applied to the as-built rows only."
+    },
+    "inclination": {
+      "value": 98.61,
+      "units": "deg",
+      "source": "assumed",
+      "note": "Orbit inclination of every closed-loop run: scalar/harness/spec.py line 43 and scalar/control/rl_tune.py line 72; scripts/absolute_without_gps.py line 30 calls it S7's orbit. The open-loop runs and the CircularOrbit default use 51.6 deg (scalar/environment/orbit.py line 50). Replaced by the orbit the launch provides. Applied to the as-built rows only."
+    },
+    "raan": {
+      "value": 0.0,
+      "units": "deg",
+      "source": "assumed",
+      "note": "Right ascension of the ascending node at the start date (scalar/harness/spec.py line 44); no source. With epoch it sets where the Sun sits relative to the orbit plane, and so the eclipse share of each orbit. Replaced by the orbit the launch provides. Applied to the as-built rows only."
+    },
+    "epoch": {
+      "value": "2026-09-11T12:00:00",
+      "units": "UTC",
+      "source": "assumed",
+      "note": "Start date and time of a run (scalar/harness/spec.py line 41, scalar/control/rl_tune.py line 73); no source. Sets the Sun direction and Earth's rotation at the start. Replaced by a planned operations date once launch is known. Applied to the as-built rows only."
     }
   }
 }
