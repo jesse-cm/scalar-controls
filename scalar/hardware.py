@@ -147,9 +147,9 @@ _STUDY_ONLY = {
                                      "the as-built rows fly sun_sensor.normals",
 }
 
-# Hardware numbers in the code that have no entry, and why (reported, not read). README sections 4
-# (where each number lives) and 5 (what the estimator does not do with the file) name each of these;
-# keep them in step.
+# Hardware numbers in the code that have no entry, and why (reported, not read). docs/LIMITATIONS.md
+# names each of these ("Inputs not in hardware.json" for where each number lives, "What the sensors and
+# estimator leave out" for what the estimator does not do with the file); keep them in step.
 NOT_IN_FILE = (
     ("coupling of coil current and radio into the magnetometer (phase-5 bench item)",
      "no model of it in scalar/; adding one is a change to sensor physics"),

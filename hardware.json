@@ -6,7 +6,7 @@
     "Checked by scalar/hardware.py. Used by the as-built rows (python3 scripts/matrix.py --experiments hw) and by",
     "scripts/gyro_realism.py, mag_realism.py, sun_realism.py. The reference runs (experiments 1-6, --gate) never read it.",
     "After editing: python3 -m pytest tests/test_hardware.py -q, then rerun the as-built rows, then python3 scripts/report.py --write.",
-    "Hardware numbers that are not in this file, where they live and why: README section 4."
+    "Hardware numbers that are not in this file, where they live and why: docs/LIMITATIONS.md, part \"Inputs not in hardware.json\"."
   ],
   "gyro": {
     "noise_density": {
@@ -153,7 +153,7 @@
       "value": [[0.45792, 0.0, 0.0], [0.0, 0.45792, 0.0], [0.0, 0.0, 0.3979898241421668]],
       "units": "A m^2/A",
       "source": "assumed",
-      "note": "Dipole per amp, column j = channel j. Computed from the S3 coil geometry (turns x area, air core) in scalar/sysid/magnetorquer_id.py lines 164-178; no source confirms the coil set (README section 5, decisions not yet made). Replaced by a coil measurement (or the in-flight burst identification, notes section 3)."
+      "note": "Dipole per amp, column j = channel j. Computed from the S3 coil geometry (turns x area, air core) in scalar/sysid/magnetorquer_id.py lines 164-178; no source confirms the coil set (docs/LIMITATIONS.md, decisions not yet made). Replaced by a coil measurement (or the in-flight burst identification, notes section 3)."
     },
     "max_current": {
       "value": [0.12692307692307692, 0.12692307692307692, 0.021897810218978103],

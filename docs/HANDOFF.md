@@ -23,7 +23,7 @@ several inputs are assumed rather than measured (see
 Every hardware number, with its source, and where bench results are typed
 in: [`hardware.json`](../hardware.json) ([README, section 1](../README.md#1-working-with-the-code));
 the hardware numbers that are not in it, and where they live:
-[README, section 4](../README.md#4-hardware-numbers-and-other-inputs).
+[LIMITATIONS.md](LIMITATIONS.md#inputs-not-in-hardwarejson).
 
 ## Where things are
 
@@ -118,6 +118,7 @@ it as modified.
 | `learned-estimation-and-control.html` | a one-page formatted version of sections 1 to 5 of the notes as they stood on 2026-09-11. Not updated since; the `.md` is the source |
 | `magnetorquer-defects.md` | what can go wrong with hand-built coils, how big, and what absorbs it |
 | `verification-loop-plan.md` | the plan for checking the notes' conclusions: rules, pass/fail limits, phases |
+| `LIMITATIONS.md` | every known limitation, fix needed and undecided question, one line each with a link; and the inputs that are not in `hardware.json` |
 | `RESULTS.md` | the results scoreboard: the ledger rows as tables, each against its pass/fail limit. Written by `python3 scripts/report.py --write`; not edited by hand |
 | `determination-results.md` | the determination results (estimator accuracy, estimator comparison, sensor calibration), moved unchanged from the README |
 
@@ -204,7 +205,7 @@ Assumed, not known:
   [What the hardware actually is](learned-estimation-and-control.md#what-the-hardware-actually-is)
 - what the simulation leaves out, every known open problem, and the
   decisions not yet made:
-  [README, section 5](../README.md#5-limitations)
+  [LIMITATIONS.md](LIMITATIONS.md)
 
 How the conclusions are meant to be checked:
 [verification-loop-plan.md](verification-loop-plan.md).
