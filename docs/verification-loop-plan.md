@@ -320,6 +320,42 @@ conclusion 3 of the plant-step row. The ledger has no platform column. Rows
 with git hash `28c434b` and later are cluster rows; a lost-seed count or an
 acquisition figure should be compared only with rows from the same platform.
 
+### 2026-10-24 — tuning on eight seeds (`results/lqr_tuned_ms.json`)
+
+Cross-entropy search from `lqr_tuned_3mode`, population 12, 5 generations,
+training seeds 0–7, same criteria and reward
+(`python3 scripts/rl_tune_lqr.py 12 5 results/lqr_tuned_3mode.json
+results/lqr_tuned_ms.json --seeds 0-7`; log in `results/rl_tune_ms.log`). Both
+files were then run on the cluster at commit `6fed91d`: rows `s6_*_lqr_tuned_ms`
+and `s6_*_lqr_tuned_3mode` for seed sets `0-39` and `100-114`, and the 6-orbit
+acquisition rows `s6_acq120x6orb_*` (`--experiments 6L`). The earlier laptop
+rows of the three-mode file are superseded by these on the scoreboard.
+
+| | `lqr_tuned_3mode` | `lqr_tuned_ms` |
+|---|---|---|
+| Fine pointing mean, median across seeds, 0–39 / 100–114 | 5.44° / 6.73° | 5.47° / 6.81° |
+| Fine pointing lost, of 40 / of 15 | 0 / 0 | 0 / 0 |
+| Acquisition flagged lost, 4 orbits, of 40 / of 15 | 5 / 2 | 0 / 0 |
+| Acquisition flagged lost, 6 orbits, of 40 | 0 | 0 |
+| Acquisition settle, median, 4 orbits / 6 orbits | 5.12 h / 6.71 h | 4.96 h / 6.29 h |
+
+1. Tuning on four times as many seeds does not move fine pointing. This
+   agrees with section 6 of the notes: the fine-pointing error is set by the
+   estimator, not by the controller weights.
+2. The acquisition flags go away, including on seeds the tuner did not see.
+   Not ledger rows: on seeds 8–39 the count is 4 for the three-mode file and
+   0 for the new one.
+3. With a 6-orbit episode neither file loses a seed. The seeds flagged at
+   4 orbits were slow, not lost; what the new weights buy is speed.
+4. The settle time is not comparable across episode lengths. It is the first
+   moment after which the error is under 10° for at least 90 % of the rest of
+   the run (`ClosedLoopResult.settle_time`, `scalar/control/tune.py`), so the
+   same controller reports about 5 h in a 4-orbit run and 6.3–6.7 h in a
+   6-orbit run. The 6 h limit cannot be judged until the measure uses a fixed
+   window.
+5. One seed (29) does not meet the settle condition in the 6-orbit run for
+   either file. Not investigated.
+
 ### Not started
 
 Phase 1 rows 1a, 1b, 1d, 1e and 1g; phases 3 and 4. Phase 5 needs the
@@ -335,8 +371,10 @@ hardware.
 - The two acquisition measures overlap. The episode is 4 orbits (6.38 h), the
   lost flag looks at the last orbit (from 4.78 h) and the settle limit is 6 h.
   Of the 7 flagged seeds of the three-mode file (55 seeds), 6 met the settle
-  condition during the last orbit. A 6-orbit episode is being run to separate
-  slow from lost.
+  condition during the last orbit. The 6-orbit rows (entry above) show those
+  seeds were slow, not lost. Still open: the lost flag and the settle time
+  both depend on the episode length and need definitions tied to a fixed
+  window.
 - `scalar/control/tune.py` records knowledge and pointing error one step late
   (the estimate at t_k against the truth at t_k + dt). It adds about
   |rate| x dt to the knowledge error, 1.4° at the start of an acquisition and
