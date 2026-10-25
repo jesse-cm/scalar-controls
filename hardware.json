@@ -1,0 +1,178 @@
+{
+  "about": [
+    "Hardware inputs of the simulation: one entry per number, grouped by device. Bench results go here.",
+    "Each entry: value (null = unknown, not applied), units (fixed per entry; convert the number, not the units),",
+    "source (assumed | datasheet | measured), note (where the number comes from, or which bench test replaces it).",
+    "Checked by scalar/hardware.py. Used by the as-built rows (python3 scripts/matrix.py --experiments hw) and by",
+    "scripts/gyro_realism.py, mag_realism.py, sun_realism.py. The reference runs (experiments 1-6, --gate) never read it.",
+    "After editing: python3 -m pytest tests/test_hardware.py -q, then rerun the as-built rows, then python3 scripts/report.py --write."
+  ],
+  "gyro": {
+    "noise_density": {
+      "value": 0.0038,
+      "units": "deg/s/sqrt(Hz)",
+      "source": "assumed",
+      "note": "Rate noise density (angle random walk). scalar/sensors/gyro.py lines 12 and 62 call it a representative published LSM6DSO figure; not checked against the datasheet. Replaced by the Allan deviation of the 2 h static log (verification-loop plan, phase 5)."
+    },
+    "bias_random_walk": {
+      "value": 1e-05,
+      "units": "rad/s/sqrt(s)",
+      "source": "assumed",
+      "note": "Rate random walk of the bias, scalar/sensors/gyro.py line 79; no source given. Replaced by the Allan deviation of the 2 h static log (phase 5)."
+    },
+    "initial_bias": {
+      "value": [0.2, -0.15, 0.1],
+      "units": "deg/s",
+      "source": "assumed",
+      "note": "Zero-rate output per axis at the start of a run, scalar/sensors/gyro.py line 80; no source given. Replaced by the mean of the 2 h static log (phase 5)."
+    },
+    "scale_factor": {
+      "value": [0.01, 0.01, 0.01],
+      "units": "fraction",
+      "source": "assumed",
+      "note": "Scale-factor error per axis (0.01 = reads 1 % high). Size 1 % from docs/verification-loop-plan.md row 1h; same sign on all axes is a choice (was ASSUMED_SCALE_FACTOR_SIGNS in scripts/gyro_realism.py). Replaced by a rate-table run of the flight board, each axis both directions."
+    },
+    "misalignment": {
+      "value": [0.2886751345948129, 0.2886751345948129, 0.2886751345948129],
+      "units": "deg",
+      "source": "assumed",
+      "note": "Rotation vector of the sensor axes from the body axes (v_sensor = C v_body). 0.5 deg from docs/verification-loop-plan.md row 1h, about the body diagonal (1, 1, 1)/sqrt(3), a choice (was ASSUMED_MISALIGN_AXIS in scripts/gyro_realism.py). Replaced by the same rate-table run (cross-axis response)."
+    },
+    "lsb": {
+      "value": 0.00875,
+      "units": "deg/s",
+      "source": "assumed",
+      "note": "Output step. The author's recollection of the LSM6DSO step at +-250 deg/s, not checked against the datasheet or the flight code (scripts/gyro_realism.py, was ASSUMED_GYRO_LSB_DEG_S). Replaced by the range the flight driver sets and the step seen in the 2 h static log."
+    },
+    "temp_coeff": {
+      "value": [0.01, -0.01, 0.01],
+      "units": "deg/s/K",
+      "source": "assumed",
+      "note": "Zero-rate drift per kelvin, per axis. Size from the author's recollection, signs a choice (scripts/gyro_realism.py, was ASSUMED_GYRO_TEMP_COEFF_DEG_S_PER_K). Replaced by the phase-5 temperature ramp with the TMP112s: slope of each axis' static output against temperature."
+    }
+  },
+  "magnetometer": {
+    "noise_std": {
+      "value": 3e-07,
+      "units": "T",
+      "source": "assumed",
+      "note": "White noise per axis, 1 sigma. scalar/sensors/magnetometer.py lines 42 and 61 call it a representative published LIS2MDL figure; not checked against the datasheet. Replaced by the 2 h static log (phase 5)."
+    },
+    "hard_iron_bias": {
+      "value": [1.5e-06, -1e-06, 8e-07],
+      "units": "T",
+      "source": "assumed",
+      "note": "Offset in body axes, the plant of the notes, section 6 (scalar/control/rl_tune.py line 75). Replaced by the ellipsoid fit of the board rotated through all orientations (phase 5)."
+    },
+    "soft_iron": {
+      "value": [[1.05, 0.02, 0.0], [0.0, 0.97, 0.02], [0.01, 0.0, 1.04]],
+      "units": "-",
+      "source": "assumed",
+      "note": "Distortion matrix D (B_meas = D B + b), the plant of the notes, section 6 (scalar/control/rl_tune.py lines 76-77). Replaced by the same ellipsoid fit (phase 5)."
+    },
+    "lsb": {
+      "value": 1.5e-07,
+      "units": "T",
+      "source": "assumed",
+      "note": "Output step, 0.15 uT from docs/verification-loop-plan.md row 1c (scalar/sensors/magnetometer.py line 64). Replaced by the step seen in the 2 h static log."
+    },
+    "temp_coeff": {
+      "value": [3e-08, -2e-08, 1e-08],
+      "units": "T/K",
+      "source": "assumed",
+      "note": "Offset drift per kelvin, per axis; no file states it (scripts/mag_realism.py, was ASSUMED_TEMP_COEFF_T_PER_K). Replaced by the phase-5 temperature ramp with the TMP112s: slope of each axis' offset against temperature."
+    }
+  },
+  "sun_sensor": {
+    "integration_time": {
+      "value": 25,
+      "units": "ms",
+      "source": "assumed",
+      "note": "VEML6031 integration time; one of 400, 200, 100, 50, 25, 12.5, 6.25. The module default (scalar/sensors/veml6031.py line 72), which tests/test_veml6031.py calls the flight setting; at 25 ms the sensor clips in direct sun (notes, section 12). Replaced by the rotary-stage test: the setting that survives full sun (phase 5)."
+    },
+    "normals": {
+      "value": [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, 1.0]],
+      "units": "-",
+      "source": "assumed",
+      "note": "Outward normal of each sensor, devicetree faces 0, 1, 2, 3, 5, 6, 7, in body axes (scalar/sensors/veml6031.py lines 54-60: which side face is which is unknown, notes section 9). Replaced by the rotary-stage sweep (phase 5)."
+    },
+    "gains": {
+      "value": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+      "units": "-",
+      "source": "assumed",
+      "note": "Relative gain of each sensor, faces 0, 1, 2, 3, 5, 6, 7: unit gains, as VEML6031Array takes them from the ideal cube (scalar/sensors/veml6031.py lines 18-20, which give the datasheet output tolerance as +-10 %). Replaced by the rotary-stage test (response of each sensor face-on)."
+    },
+    "dark_offset": {
+      "value": 4.0,
+      "units": "counts",
+      "source": "datasheet",
+      "note": "Dark output, typical: scalar/sensors/veml6031.py line 47 (datasheet p.2)."
+    },
+    "noise": {
+      "value": 0.02,
+      "units": "fraction of full scale",
+      "source": "assumed",
+      "note": "Noise per sample, 1 sigma, as a fraction of the face-on full-sun reading: scalar/sensors/sun_sensor.py line 72, carried into the VEML model (scalar/sensors/veml6031.py lines 17-19). Replaced by the rotary-stage test (spread of repeated readings)."
+    },
+    "mounting_tilt_sigma": {
+      "value": 2.0,
+      "units": "deg",
+      "source": "assumed",
+      "note": "1-sigma mounting tilt of each normal, used only by the cube_tilt layout of scripts/sun_realism.py (was ASSUMED_TILT_DEG; 2.0 is the default tilt_deg of sun_mlp.flight_like_sensor). Not applied to the as-built rows, which fly the normals entry. Replaced by measured normals."
+    },
+    "mounting_tilt_seed": {
+      "value": 1,
+      "units": "-",
+      "source": "assumed",
+      "note": "Random seed that draws the cube_tilt layout of scripts/sun_realism.py (was ASSUMED_TILT_SEED). Not applied to the as-built rows. Not a hardware number; drops out once the normals are measured."
+    }
+  },
+  "board_temperature": {
+    "swing_amplitude": {
+      "value": 15.0,
+      "units": "K",
+      "source": "assumed",
+      "note": "Half the peak-to-peak board temperature swing, one sinusoid per orbit, seen by gyro and magnetometer alike (scripts/mag_realism.py, was ASSUMED_TEMP_AMP_K). Replaced by a TMP112 log over an orbit: put its path in log_csv and set this and swing_phase to null."
+    },
+    "swing_phase": {
+      "value": 0.0,
+      "units": "deg",
+      "source": "assumed",
+      "note": "Phase of the swing at t = 0; 0 = at its mean, warming (scripts/mag_realism.py, was ASSUMED_TEMP_PHASE_DEG)."
+    },
+    "log_csv": {
+      "value": null,
+      "units": "path",
+      "source": "assumed",
+      "note": "Path (from the repository root) of a logged board temperature: CSV with a header row and two columns, time [s] and temperature [deg C]. Replaces the swing (set swing_amplitude and swing_phase to null). Replayed end to end, repeating; the log's mean is taken as the temperature at which the biases above hold."
+    }
+  },
+  "coils": {
+    "dipole_per_amp": {
+      "value": [[0.45792, 0.0, 0.0], [0.0, 0.45792, 0.0], [0.0, 0.0, 0.3979898241421668]],
+      "units": "A m^2/A",
+      "source": "assumed",
+      "note": "Dipole per amp, column j = channel j. Computed from the S3 coil geometry (turns x area, air core) in scalar/sysid/magnetorquer_id.py lines 164-178; no source confirms the coil set (README section 4). Replaced by a coil measurement (or the in-flight burst identification, notes section 3)."
+    },
+    "max_current": {
+      "value": [0.12692307692307692, 0.12692307692307692, 0.021897810218978103],
+      "units": "A",
+      "source": "assumed",
+      "note": "Full-scale current per channel: 3.3 V over 2 x 13 ohm, 2 x 13 ohm, 150.7 ohm (scalar/sysid/magnetorquer_id.py line 177). Replaced by measured coil resistance and driver output voltage."
+    }
+  },
+  "body": {
+    "inertia": {
+      "value": [[0.0019500000000000003, 0.0, 0.0], [0.0, 0.002166666666666667, 0.0], [0.0, 0.0, 0.0024916666666666668]],
+      "units": "kg m^2",
+      "source": "assumed",
+      "note": "1.3 kg uniform 10 cm cube with axis factors 0.9, 1.0, 1.15 (scalar/dynamics.py line 49). Replaced by a CAD mass model or a pendulum measurement of the flight unit."
+    },
+    "residual_dipole": {
+      "value": [0.002, -0.001, 0.0005],
+      "units": "A m^2",
+      "source": "assumed",
+      "note": "Residual magnetic dipole of the spacecraft, coils off (scalar/control/rl_tune.py line 74). Replaced by a magnetic-cleanliness measurement of the assembled unit."
+    }
+  }
+}

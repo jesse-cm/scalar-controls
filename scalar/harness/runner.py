@@ -32,7 +32,7 @@ from ..environment.orbit import CircularOrbit
 from ..estimator.mekf import MEKF, run_mekf
 from ..scenario import Scenario
 from ..sensors.gyro import Gyro
-from ..sensors.magnetometer import Magnetometer, sinusoid_temperature
+from ..sensors.magnetometer import Magnetometer, sinusoid_temperature, tabulated_temperature
 from ..sensors.sun_sensor import SunSensorArray
 from ..sysid.magnetorquer_id import (PulseSchedule, identify_dipole_matrix,
                                      identify_dipole_matrix_impulse, s3_coil_matrix,
@@ -62,6 +62,18 @@ def _inertia(spec):
     return RigidBody().inertia if spec.inertia is None else np.array(spec.inertia, float)
 
 
+def _board_temperature(spec, amp_K, phase_deg):
+    """Board temperature t -> deviation [K] from the temperature at which the biases hold.
+
+    The once-per-orbit sinusoid of the realism rows, or, with ``board_temp_log``, the logged profile
+    replayed end to end and repeating (period = its span plus its median step), shared by both sensors.
+    """
+    if spec.board_temp_log is None:
+        return sinusoid_temperature(0.0, amp_K, _orbit(spec).period, phase_deg * DEG)
+    t, dT = (np.array(x, float) for x in spec.board_temp_log)
+    return tabulated_temperature(t, dT, period_s=float(t[-1] - t[0] + np.median(np.diff(t))))
+
+
 def _gyro(spec):
     kw = {}
     if spec.gyro_noise_density is not None:
@@ -81,8 +93,7 @@ def _gyro(spec):
         # deviation of the board temperature from the one at which the initial bias holds
         # (temp_ref = 0); the same profile _magnetometer builds, so both sensors see one board
         kw["temp_coeff"] = np.array(spec.gyro_temp_coeff_deg_s_per_K, float) * DEG
-        kw["temperature"] = sinusoid_temperature(0.0, spec.gyro_temp_amp_K, _orbit(spec).period,
-                                                 spec.gyro_temp_phase_deg * DEG)
+        kw["temperature"] = _board_temperature(spec, spec.gyro_temp_amp_K, spec.gyro_temp_phase_deg)
     return Gyro(**kw)
 
 
@@ -100,8 +111,7 @@ def _magnetometer(spec):
     if spec.mag_temp_coeff_T_per_K is not None:
         # deviation of the board temperature from the one at which mag_bias_T holds (temp_ref = 0)
         kw["temp_coeff"] = np.array(spec.mag_temp_coeff_T_per_K, float)
-        kw["temperature"] = sinusoid_temperature(0.0, spec.mag_temp_amp_K, _orbit(spec).period,
-                                                 spec.mag_temp_phase_deg * DEG)
+        kw["temperature"] = _board_temperature(spec, spec.mag_temp_amp_K, spec.mag_temp_phase_deg)
     return Magnetometer(**kw)
 
 
@@ -140,6 +150,10 @@ def _sun_sensor(spec, seed=0):
             kw["integration_ms"] = spec.veml_integration_ms
         if spec.veml_normals is not None:
             kw["normals"] = np.array(spec.veml_normals, float)
+        if spec.veml_gains is not None:
+            kw["gains"] = np.array(spec.veml_gains, float)
+        if spec.veml_dark_counts is not None:
+            kw["dark_counts"] = float(spec.veml_dark_counts)
         s = VEML6031Array(**kw)
     return s
 
@@ -156,6 +170,10 @@ def _mekf(spec):
 def _plant(spec):
     """rl_tune.Plant for this spec, so build_controller / calibration_pass are reused as they are."""
     M, i_max = s3_coil_matrix()
+    if spec.coil_matrix is not None:            # hardware.json coils.dipole_per_amp (as-built rows)
+        M = np.array(spec.coil_matrix, float)
+    if spec.coil_i_max is not None:
+        i_max = np.array(spec.coil_i_max, float)
     mag = _magnetometer(spec)
     return Plant(_inertia(spec), M, i_max, inclination_deg=spec.inclination_deg, epoch=_epoch(spec),
                  m_res=np.array(spec.m_res, float), mag_bias=mag.bias, mag_soft_iron=mag.soft_iron,
@@ -175,7 +193,7 @@ def mlp_key(spec):
         return None
     return (spec.sun_front, spec.sun_unit, spec.sun_unit_seed, spec.sun_gain_sigma, spec.sun_rolloff,
             spec.sun_tilt_deg, spec.sun_noise_frac, spec.mlp_train_seed, spec.mlp_epochs,
-            spec.sun_array, spec.veml_integration_ms, spec.veml_normals)
+            spec.sun_array, spec.veml_integration_ms, spec.veml_normals, spec.veml_gains, spec.veml_dark_counts)
 
 
 def _mlp(spec):

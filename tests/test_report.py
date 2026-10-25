@@ -1,10 +1,12 @@
-"""Tests: the results scoreboard (scripts/report.py) is built from the ledger and nothing else.
+"""Tests: the results scoreboard (scripts/report.py) is built from the ledger and nothing else
+(plus the cross-check JSON and hardware.json, each for a table of its own).
 
     - it builds from the committed results/ledger.csv and results/crosscheck_basilisk.json
     - every ledger scenario has exactly one home: one table, or the "not shown" list
     - every PASS / FAIL agrees with scalar.control.rl_tune.THRESHOLDS (and, for knowledge, with
       the limit in rule 2 of docs/verification-loop-plan.md), on the value in the ledger
     - a scenario name the report has never seen still shows up
+    - table H is every entry of hardware.json as it stands; table G holds the as-built rows
     - docs/RESULTS.md is what the command writes today
     - the pytest hook in conftest.py prints it and cannot fail a run
 
@@ -59,7 +61,7 @@ def _home_tables(rep, scenario):
 
 def test_builds_from_the_committed_ledger(rep, ledger):
     assert rep.problems == []
-    assert [t.key for t in rep.tables] == ["A1", "A2", "A2b", "B", "C1", "C2", "D", "E"]
+    assert [t.key for t in rep.tables] == ["A1", "A2", "A2b", "B", "C1", "C2", "D", "E", "G", "H"]
     assert all(t.rows and t.note for t in rep.tables)
     a = rep.accounting
     assert a["rows"] == len(ledger)
@@ -210,10 +212,70 @@ def test_a_rerun_replaces_the_earlier_row(tmp_path, ledger):
 
 
 def test_missing_files_do_not_raise(tmp_path):
-    rep2 = report.build(ledger_path=str(tmp_path / "none.csv"), crosscheck_path=str(tmp_path / "none.json"))
-    assert len(rep2.problems) == 2 and rep2.tables == []
+    rep2 = report.build(ledger_path=str(tmp_path / "none.csv"), crosscheck_path=str(tmp_path / "none.json"),
+                        hardware_path=str(tmp_path / "none_hw.json"))
+    assert len(rep2.problems) == 3 and rep2.tables == []
     assert "could not be read" in report.render_terminal(rep2)
     assert "could not be read" in report.render_markdown(rep2)
+
+
+def test_hardware_table_is_every_entry_of_the_file(rep, tmp_path):
+    with open(report.HARDWARE) as f:
+        raw = json.load(f)
+    expected = [(f"{d}.{n}", e["units"], e["source"], e["value"] is None)
+                for d, entries in raw.items() if d != "about" for n, e in entries.items()]
+    got = [(r.scenario, r.cells[1], r.cells[2], r.cells[0].startswith("null")) for r in rep.table("H").rows]
+    assert got == expected and expected
+    assert all(r.source is None and not r.checks for r in rep.table("H").rows)    # not a ledger row
+    bad = tmp_path / "hardware.json"
+    bad.write_text("{")
+    rep2 = report.build(hardware_path=str(bad))
+    assert "H" not in [t.key for t in rep2.tables]
+    assert len(rep2.problems) == 1 and "no hardware table" in rep2.problems[0]
+
+
+def test_as_built_rows_are_table_g(rep, ledger):
+    hw_rows = {r["scenario"] for r in ledger if r["scenario"].startswith("hw_")}
+    assert hw_rows and all(rep.home[s] == "G" for s in hw_rows)
+    for r in rep.table("G").rows:
+        names = {c.limit_name for c in r.checks}
+        episode = "acq" if r.scenario.startswith("hw_acq") else "fine"
+        assert names == ({"acq_diverged", "acq_settle_h"} if episode == "acq" else {"fine_diverged", "fine_point_mean"})
+
+
+_TUNED = re.compile(r"^s6_(acq|fine)\d+_[a-z]+mag_lqr_tuned_3mode(?:\+(.+))?$")
+
+
+def test_headline_is_short_and_shows_every_tag_of_the_tuned_controller(rep, ledger):
+    text = report.headline_text()
+    lines = text.splitlines()
+    rows = rep.headline["rows"]
+    assert len(lines) <= 7 + len(rows)                  # title, note, column heads, hardware, footer: one row per tag
+    assert len(lines) <= 40 and max(len(line) for line in lines) <= report.WIDTH
+    assert lines[-1].startswith("Full tables:") and "docs/RESULTS.md" in lines[-1]
+    labels = [lab for lab, _ in rows]
+    tags = {(m.group(2) or "no switch") + (" (acq)" if m.group(1) == "acq" else "")
+            for r in ledger for m in [_TUNED.match(r["scenario"])] if m and not all(
+                r[c] == "" for c in r if "__" in c)}
+    assert tags and tags <= set(labels), tags - set(labels)
+    built = {f"as built: {r['scenario'].split('_', 2)[2]}" + (" (acq)" if r["scenario"].startswith("hw_acq") else "")
+             for r in ledger if r["scenario"].startswith("hw_")}
+    assert built and built <= set(labels)
+    assert any(line.lstrip().startswith("hardware.json:") for line in lines)
+    full = report.render_terminal(rep)
+    assert full.index(lines[0]) < full.index("\nA1. ")    # the headline sits on top of the tables
+    for lab, cells in rows:
+        for c in cells:
+            assert c == "-" or c.split()[-1] in ("PASS", "FAIL"), (lab, c)
+
+
+def test_a_new_tag_of_the_tuned_controller_reaches_the_headline(tmp_path, ledger):
+    tuned = next(r for r in ledger if _TUNED.match(r["scenario"]) and "+" not in r["scenario"]
+                 and r["scenario"].startswith("s6_fine") and r["seed_set"] == "0-39")
+    rep2 = report.build(ledger_path=_ledger_with(tmp_path, ledger, [
+        dict(tuned, scenario=tuned["scenario"] + "+zz9_neverseen", estimator="mekf+zz_front")]))
+    assert "zz9_neverseen" in [lab for lab, _ in rep2.headline["rows"]]
+    assert "zz_front" in rep2.headline["fronts"]
 
 
 def test_results_md_is_what_the_command_writes(rep):
@@ -246,7 +308,7 @@ def test_pytest_hook_prints_the_scoreboard_and_never_raises(rep, monkeypatch):
     conftest = _load("scalar_conftest_under_test", os.path.join(ROOT, "conftest.py"))
     out = _Reporter()
     conftest.pytest_terminal_summary(out, 0, _Config())
-    assert "\n".join(out.lines[1:]) + "\n" == report.render_terminal(rep)
+    assert "\n".join(out.lines[1:]) + "\n" == report.render_headline(rep) + report.HEADLINE_FOOTER.replace("`", "") + "\n"
 
     off = _Reporter()
     conftest.pytest_terminal_summary(off, 0, _Config(**{"--no-scoreboard": True}))

@@ -20,6 +20,8 @@ corrections added beside claims that later runs contradicted. All of it is
 simulation: nothing is flight software, nothing has been run on hardware, and
 several inputs are assumed rather than measured (see
 [Open items](#open-items-that-need-hardware-or-a-decision)).
+Every hardware number, with its source, and where bench results are typed
+in: [`hardware.json`](../hardware.json) ([README, section 1](../README.md#1-working-with-the-code)).
 
 ## Where things are
 
@@ -142,8 +144,8 @@ python3 scripts/verify_controller.py results/lqr_tuned_3mode.json
 The first two lines install the packages; `pytest` and `torch` are not in
 `requirements.txt`. The third runs the tests. The fourth prints the results
 scoreboard: every result row in `results/ledger.csv` as a table, with PASS or
-FAIL against its limit; it runs no simulation, and the test run ends with the
-same printout. Then: one determination run, the
+FAIL against its limit, under a short headline; it runs no simulation, and the
+test run ends with the headline. Then: one determination run, the
 periodic-LQR demonstration, and the pass/fail check of the tuned controller
 (it exits with status 1 when a limit is missed). What each line needs, the
 rest of the scripts, and which of them were re-run on 2026-10-24 are in the

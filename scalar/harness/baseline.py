@@ -30,7 +30,8 @@ from .spec import ScenarioSpec
 
 __all__ = ["SEEDS", "PLAN_GATE_SEED", "DocCheck", "baseline_specs", "SCRIPT_SEEDS", "DOC_CHECKS",
            "projected_weight_draws", "rl_tune_specs", "TUNED_FILES", "tuned_controller_specs",
-           "LONG_ACQ_FILES", "LONG_ACQ_ORBITS", "long_acquisition_specs", "select_specs"]
+           "LONG_ACQ_FILES", "LONG_ACQ_ORBITS", "long_acquisition_specs", "select_specs",
+           "AS_BUILT_VARIANTS", "as_built_specs"]
 
 SEEDS = tuple(range(40))        # rule 4 of the verification-loop plan
 PLAN_GATE_SEED = 2              # the seed the plan's gate assumes
@@ -320,10 +321,41 @@ def long_acquisition_specs(files=LONG_ACQ_FILES, n_orbits=LONG_ACQ_ORBITS, resul
     return specs
 
 
-def select_specs(experiments=None):
-    """baseline_specs(experiments), then tuned_controller_specs() for id '6', long_acquisition_specs() for '6L'.
+# Experiment "hw": the as-built rows. (name suffix, sources applied: None = every non-null entry)
+AS_BUILT_VARIANTS = (("all", None), ("not_assumed", ("datasheet", "measured")))
+AS_BUILT_FILE = "lqr_tuned_3mode"
 
-    ``None`` is the baseline only (experiments 1-5); experiments 6 and 6L are never selected by default.
+
+def as_built_specs(hardware_path=None, results_dir=_RESULTS):
+    """Experiment "hw": the tuned three-mode controller with hardware.json applied.
+
+    The two episodes of experiment 6 for results/lqr_tuned_3mode.json (acquisition and fine
+    pointing, calibrated magnetometer), with every entry scalar.hardware.as_built_fields applies,
+    the VEML6031 array as the sun sensor, and the plant holding the coil dipole over each step with
+    2 substeps (dynamics.plant_step). One pair per AS_BUILT_VARIANTS entry, named
+    ``hw_<acq120|fine20>_<variant>``. An entry not applied keeps the experiment-6 value.
+
+    The only experiment that reads hardware.json; never selected by default, never part of --gate.
+    """
+    from ..hardware import as_built_fields, load
+    hw = load(hardware_path)
+    acq, fine = tuned_controller_specs((AS_BUILT_FILE,), results_dir)
+    out = []
+    for variant, sources in AS_BUILT_VARIANTS:
+        kw, _ = as_built_fields(hw, sources)
+        for s in (acq, fine):
+            episode = s.name.split("_")[1]                  # acq120 / fine20
+            out.append(s.replace(name=f"hw_{episode}_{variant}", experiment="hw",
+                                 plant_hold="dipole", plant_substeps=2, **kw))
+    return out
+
+
+def select_specs(experiments=None):
+    """baseline_specs(experiments), then tuned_controller_specs() for id '6',
+    long_acquisition_specs() for '6L' and as_built_specs() for 'hw'.
+
+    ``None`` is the baseline only (experiments 1-5); experiments 6, 6L and hw are never
+    selected by default.
     """
     specs = baseline_specs(experiments)
     want = set() if experiments is None else {str(e) for e in experiments}
@@ -331,4 +363,6 @@ def select_specs(experiments=None):
         specs += tuned_controller_specs()
     if "6L" in want:
         specs += long_acquisition_specs()
+    if "hw" in want:
+        specs += as_built_specs()
     return specs
