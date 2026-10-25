@@ -61,7 +61,7 @@ python3 scripts/matrix.py --list      # the scenarios a simulation run can add r
 | `scalar/calibration/` | three ways of measuring and removing magnetometer and sun-sensor errors |
 | `scalar/actuators/` | the magnetic coils (magnetorquers): Earth's field pushes on an energised coil and turns the spacecraft |
 | `scalar/control/` | controllers: LQR (feedback gains from a cost on error and effort), periodic LQR (a different gain for each point of the orbit), mode switching, LQI (adds accumulated past error); the closed-loop simulation in `tune.py`; the automatic tuner and the pass/fail limits in `rl_tune.py` |
-| `scalar/learning/` | a small neural network that turns raw sun-sensor readings into a Sun direction |
+| `scalar/learning/` | a small neural network that turns raw sun-sensor readings into a Sun direction; it is trained on examples this simulator generates, not on real sensor data ([notes §1](docs/learned-estimation-and-control.md#1-a-neural-network-for-state-estimation--where-it-actually-helps)) |
 | `scalar/sysid/` | working out each coil's strength and direction from recorded motion |
 | `scalar/harness/` | one record per scenario, one runner, the fixed set of metrics, the ledger format |
 | `scripts/report.py` | the results scoreboard |

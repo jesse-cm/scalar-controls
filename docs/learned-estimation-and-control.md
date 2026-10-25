@@ -28,6 +28,21 @@ body frame + dayside factor] -> 32 -> 32 -> unit vector) trained for one
 flight-like unit replaces the opposing-pair reconstruction and feeds the MEKF
 unchanged.
 
+> **Where the training data comes from (added 2026-10-24).** From this
+> simulator; no real sensor data is used anywhere. `make_dataset` in
+> `scalar/learning/sun_mlp.py` draws random situations (a Sun direction, an
+> Earth direction, an albedo level between 0 and 0.5, a dayside factor), asks
+> the simulated sensor for its readings in each, noise included, and uses the
+> Sun direction it drew as the answer to learn. `train_sun_mlp` uses 200,000
+> such examples plus 20,000 held back for checking, 20 passes, and a fixed
+> seed, and is run again at the start of every script that needs a network.
+> The simulated sensor is one "flight-like" unit (`flight_like_sensor`): each
+> detector has a gain error (5 % spread), a tilt (2° spread) and a roll-off at
+> shallow angles. For the VEML6031 array the Sun's brightness is also varied
+> over its yearly range. So the network is graded on the same simulated sensor
+> and albedo model it learned from; see
+> [LIMITATIONS.md](LIMITATIONS.md#what-the-sensors-and-estimator-leave-out).
+
 Sun-vector error, sunlit, random geometry (median / p95, deg):
 
 | albedo | analytic | MLP-A (currents) | MLP-B (+ predicted nadir) |
