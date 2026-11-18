@@ -356,6 +356,36 @@ rows of the three-mode file are superseded by these on the scoreboard.
 5. One seed (29) does not meet the settle condition in the 6-orbit run for
    either file. Not investigated.
 
+### 2026-11-18 — two fixes in the closed loop
+
+1. Errors are recorded at matching instants (`error_timing="aligned"` in
+   `simulate_closed_loop_estimated`). The simulated trajectory is unchanged;
+   only what is recorded moves. `tests/test_error_timing.py` fails on the old
+   record with a knowledge error of 1.41° for an exact estimator.
+2. The corrected plant step of the plant-step row (coil dipole held, two
+   substeps) is now the default of the closed loop, the tuner and the
+   harness.
+3. The scenarios that reproduce the notes (the closed-loop scenarios of
+   experiments 4 and 5, and `matrix.py --gate`) pin the old loop through
+   `LEGACY_LOOP` in `scalar/control/tune.py`. Proof that they did not move:
+   the gate's per-seed output on the cluster is identical before and after
+   the change, apart from run times.
+4. Rows made with the old loop and now superseded by re-runs: experiments 6,
+   6L and hw, and the tuned-controller rows of `gyro_realism.py` and
+   `sun_realism.py`. The stored `train_metrics` inside `results/lqr_tuned*.json`
+   were produced with the old loop and reproduce only with `LEGACY_LOOP`. The
+   tuned files have not been re-tuned against the corrected loop.
+5. On the cluster the gate reads 108 of 123 matching and 11 not, against 117
+   and 2 on the laptop that produced the notes, before and after these fixes
+   alike. The difference between machines was not investigated; the likely
+   cause is the network training and the closed-loop rows, which are
+   sensitive to the last digits.
+6. Also fixed: the frame is labelled as the mean equator and equinox of date
+   in the code's comments (discrepancy A); `results/estimator_levers.json`
+   records the seeds it holds; `matrix.py --gate` refuses every experiment
+   that has no numbers in the notes; `outputs/detumble_lqr.png` is
+   regenerated after the sign fix.
+
 ### Not started
 
 Phase 1 rows 1a, 1b, 1d, 1e and 1g; phases 3 and 4. Phase 5 needs the
@@ -375,9 +405,9 @@ hardware.
   seeds were slow, not lost. Still open: the lost flag and the settle time
   both depend on the episode length and need definitions tied to a fixed
   window.
-- `scalar/control/tune.py` records knowledge and pointing error one step late
-  (the estimate at t_k against the truth at t_k + dt). It adds about
-  |rate| x dt to the knowledge error, 1.4° at the start of an acquisition and
-  negligible in fine pointing. To be fixed before row 1e is run.
+- Fixed 2026-11-18 (entry above): `scalar/control/tune.py` recorded knowledge
+  and pointing error one step late (the estimate at t_k against the truth at
+  t_k + dt), about |rate| x dt of extra knowledge error, 1.4° at the start of
+  an acquisition and negligible in fine pointing.
 - `scripts/estimator_levers.py` and `scripts/mechanism_gyro_bias.py` carry
   their own copies of the closed loop and do not get the plant switches.
