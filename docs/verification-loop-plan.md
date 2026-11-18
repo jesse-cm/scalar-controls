@@ -411,6 +411,26 @@ rows of the three-mode file are superseded by these on the scoreboard.
    that has no numbers in the notes; `outputs/detumble_lqr.png` is
    regenerated after the sign fix.
 
+### 2026-11-18 — tuned-controller rows re-run with the corrected loop
+
+All rows built on the tuned controllers were run again on the cluster at
+commit `5058c86`: experiments 6, 6L and hw, and the tuned-controller rows of
+`gyro_realism.py` and `sun_realism.py` (99 rows; each replaces the earlier row
+of the same scenario and seed set on the scoreboard). The numbers quoted in
+the dated entries above are from the old loop and stay as the record of that
+day; [RESULTS.md](RESULTS.md) shows the current rows.
+
+1. Fine pointing does not depend on the fixes. For both tuned files the
+   fine-pointing rows move by less than 1 % in every column, and no seed is
+   lost before or after.
+2. Acquisition counts move by a seed or two, as the plant-step entry
+   predicted: the three-mode file goes from 5 to 4 flagged of 40 and from 2
+   to 3 of 15; the eight-seed file stays at 0 of 40 and 0 of 15.
+3. The conclusions about albedo, the VEML6031 array, the gyro temperature
+   term and the as-built rows are unchanged: the same front ends hold or
+   lose pointing, with counts within a few seeds of the earlier rows.
+4. The full suite passes on the cluster at the same commit.
+
 ### Not started
 
 Phase 1 rows 1a, 1b, 1d, 1e and 1g; phases 3 and 4. Phase 5 needs the
