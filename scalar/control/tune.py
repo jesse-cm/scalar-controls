@@ -32,8 +32,14 @@ from ..sensors.magnetometer import Magnetometer
 from ..sensors.sun_sensor import SunSensorArray
 from .lqr import MagnetorquerLQR
 
-__all__ = ["actuators_from_matrix", "ClosedLoopResult", "ProjectedLQRAdapter",
-           "simulate_closed_loop_estimated", "tune_lqr_weights", "tune_periodic_lqr"]
+__all__ = ["actuators_from_matrix", "ClosedLoopResult", "ProjectedLQRAdapter", "ERROR_TIMINGS",
+           "LEGACY_LOOP", "simulate_closed_loop_estimated", "tune_lqr_weights", "tune_periodic_lqr"]
+
+ERROR_TIMINGS = ("aligned", "legacy")
+# The loop as it ran for docs/learned-estimation-and-control.md (experiments 4 and 5): torque held over
+# the control step, one plant substep, errors recorded one step late. Only the baseline scenarios of
+# scalar.harness.baseline pin it, so that scripts/matrix.py --gate still reproduces the notes.
+LEGACY_LOOP = {"plant_hold": "torque", "plant_substeps": 1, "error_timing": "legacy"}
 
 
 def actuators_from_matrix(M, i_max):
@@ -91,7 +97,7 @@ def simulate_closed_loop_estimated(body, actuators, orbit, jd0, K_weights=None,
                                    m_res=None, sun_sensor=None, sun_front=None,
                                    sigma_sun=None, magnetometer=None,
                                    mag_calibration=None, gyro=None,
-                                   plant_hold="torque", plant_substeps=1):
+                                   plant_hold="dipole", plant_substeps=2, error_timing="aligned"):
     """Truth -> sensors -> MEKF -> controller -> coils, at ``dt`` (1 s = flight ceiling).
 
     ``controller`` is any object with ``dipole(t, q, omega, B_meas) -> m`` and a
@@ -105,9 +111,23 @@ def simulate_closed_loop_estimated(body, actuators, orbit, jd0, K_weights=None,
     freezes the body torque of the control instant over ``dt``;
     ``plant_hold="dipole"`` freezes the dipole (command plus ``m_res``) and lets
     the torque follow the true body field inside the step
-    (``scalar.dynamics.plant_step``). The defaults are the original plant.
+    (``scalar.dynamics.plant_step``). The defaults (dipole held, 2 substeps) are
+    what a coil does, converged in the substep count (tests/test_plant_step.py);
+    ``plant_hold="torque", plant_substeps=1`` is the original plant
+    (docs/crosscheck-basilisk.md, discrepancy D).
+
+    ``error_timing="aligned"`` (default): sample k of the pointing error, the
+    knowledge error and the rate is the truth at ``t[k]``, before the plant
+    step, against the estimate after the measurements of ``t[k]`` and the
+    target. ``"legacy"``: the truth after the plant step (at ``t[k] + dt``) is
+    filed under ``t[k]``, as the loop did before; the knowledge error then
+    carries an extra ``|omega| dt`` of time offset. The simulated trajectory is
+    the same either way. ``LEGACY_LOOP`` holds all three original settings.
     """
     check_plant_switches(plant_hold, plant_substeps)
+    if error_timing not in ERROR_TIMINGS:
+        raise ValueError(f"error_timing={error_timing!r} not in {ERROR_TIMINGS}")
+    aligned = error_timing == "aligned"
     rng = np.random.default_rng(seed)
     gyro = Gyro() if gyro is None else gyro
     mag = Magnetometer() if magnetometer is None else magnetometer
@@ -161,6 +181,10 @@ def simulate_closed_loop_estimated(body, actuators, orbit, jd0, K_weights=None,
         q_c, w_c, B_c = (q, w, to_body(q, B_eci)) if use_truth else (mekf.q, g - mekf.b, Bm)
         m = ctrl.dipole(t, q_c, w_c, B_c)
         n_sat += int(np.any(np.abs([m @ tq.axis for tq in actuators.torquers]) >= 0.999 * m_max))
+        if aligned:                         # truth, estimate and target at the same instant t_k
+            pe[k] = np.degrees(attitude_error_angle(q, ctrl.q_target))
+            ke[k] = np.degrees(attitude_error_angle(mekf.q, q))
+            rate[k] = np.degrees(np.linalg.norm(w))
         m_dist = np.zeros(3) if m_res is None else np.asarray(m_res, float)
         # --- plant (RK4 on omega, exp-map on q; what is held over dt is plant_hold) ---
         if plant_hold == "torque":
@@ -169,15 +193,19 @@ def simulate_closed_loop_estimated(body, actuators, orbit, jd0, K_weights=None,
         else:
             q, w = plant_step(body, q, w, dt, substeps=plant_substeps, dipole=m + m_dist,
                               field_fn=field_eci, t=t)
-        pe[k] = np.degrees(attitude_error_angle(q, ctrl.q_target))
-        ke[k] = np.degrees(attitude_error_angle(mekf.q, q))
-        rate[k] = np.degrees(np.linalg.norm(w)); mh[k] = m
+        if not aligned:                     # legacy: the truth at t_k + dt filed under t_k
+            pe[k] = np.degrees(attitude_error_angle(q, ctrl.q_target))
+            ke[k] = np.degrees(attitude_error_angle(mekf.q, q))
+            rate[k] = np.degrees(np.linalg.norm(w))
+        mh[k] = m
     return ClosedLoopResult(t_arr, pe, ke, rate, mh, n_sat / n)
 
 
 def tune_lqr_weights(body, actuators, orbit, jd0, q0, omega0, n_candidates=24,
-                     seed=0, n_orbits=3, dt=1.0, use_truth=True, verbose=False):
+                     seed=0, n_orbits=3, dt=1.0, use_truth=True, verbose=False, **loop):
     """Random log-uniform search over (q_weight, w_weight, r_weight).
+
+    ``loop`` goes to ``simulate_closed_loop_estimated`` (e.g. ``**LEGACY_LOOP``).
 
     Objective = settle time to <10 deg (s) + 0.5 * mean pointing error over the
     last orbit (deg) * 100 + saturation-fraction penalty. Returns the sorted
@@ -191,7 +219,7 @@ def tune_lqr_weights(body, actuators, orbit, jd0, q0, omega0, n_candidates=24,
                "r_weight": 10 ** rng.uniform(7, 12)}
         res = simulate_closed_loop_estimated(body, actuators, orbit, jd0, wts, q0,
                                              omega0, dt=dt, n_orbits=n_orbits,
-                                             seed=seed, use_truth=use_truth)
+                                             seed=seed, use_truth=use_truth, **loop)
         last = res.pointing_err_deg[-int(orbit.period / dt):]
         st = res.settle_time()
         score = (min(st, n_orbits * orbit.period) + 50.0 * float(np.mean(last))
@@ -208,8 +236,10 @@ def tune_lqr_weights(body, actuators, orbit, jd0, q0, omega0, n_candidates=24,
 
 def tune_periodic_lqr(body, actuators, orbit, jd0, q0, omega0, q_target=None,
                       theta_max_deg=10.0, omega_max_deg_s=0.2, rhos=(0.01, 0.1, 1.0, 10.0),
-                      dt=1.0, n_orbits=4, seed=0, n_bins=None, verbose=False):
-    """Sweep Bryson's rho for the periodic LQR; returns sorted [(score, rho, ctrl, result)]."""
+                      dt=1.0, n_orbits=4, seed=0, n_bins=None, verbose=False, **loop):
+    """Sweep Bryson's rho for the periodic LQR; returns sorted [(score, rho, ctrl, result)].
+
+    ``loop`` goes to ``simulate_closed_loop_estimated`` (e.g. ``**LEGACY_LOOP``)."""
     from ..attitude import IDENTITY_QUAT
     from .periodic_lqr import (PeriodicLQR, bryson_weights, periodic_lqr_schedule,
                                quantize_schedule)
@@ -224,7 +254,7 @@ def tune_periodic_lqr(body, actuators, orbit, jd0, q0, omega0, q_target=None,
         ctrl = PeriodicLQR(K, orbit.period, actuators, q_target)
         res = simulate_closed_loop_estimated(body, actuators, orbit, jd0, q0=q0, omega0=omega0,
                                              dt=dt, n_orbits=n_orbits, seed=seed,
-                                             use_truth=True, controller=ctrl)
+                                             use_truth=True, controller=ctrl, **loop)
         last = res.pointing_err_deg[-int(orbit.period / dt):]
         st = res.settle_time()
         score = min(st, n_orbits * orbit.period) + 50.0 * float(np.mean(last)) + 2000.0 * res.sat_frac

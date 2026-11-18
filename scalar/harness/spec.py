@@ -65,8 +65,12 @@ class ScenarioSpec:
     # ---- sampling ----
     dt: float = 1.0                         # sensor = estimator = control step [s]
     n_orbits: float = 1.0
-    plant_hold: str = "torque"              # closed_loop only: "torque" | "dipole" held over dt (dynamics.plant_step)
-    plant_substeps: int = 1                 # closed_loop only: truth integration substeps per dt
+    # closed_loop only. Defaults: the coil dipole held over dt, 2 substeps, errors sampled at t_k.
+    # The baseline scenarios of experiments 4-5 pin the original loop (tune.LEGACY_LOOP: "torque", 1,
+    # "legacy") so that the gate reproduces the notes.
+    plant_hold: str = "dipole"              # "dipole" | "torque" held over dt (dynamics.plant_step)
+    plant_substeps: int = 2                 # truth integration substeps per dt
+    error_timing: str = "aligned"           # "aligned" | "legacy" (tune.simulate_closed_loop_estimated)
 
     # ---- sensors (None -> the sensor class / wrapped function default) ----
     gyro_noise_density: Optional[float] = None      # [rad/s/sqrt(Hz)]
@@ -255,6 +259,7 @@ class ScenarioSpec:
         one_of("coil_set", ("s3_on_s6",))
         one_of("field_truth", ("dipole", "igrf"))
         one_of("plant_hold", ("torque", "dipole"))
+        one_of("error_timing", ("aligned", "legacy"))
         if not isinstance(self.plant_substeps, int) or self.plant_substeps < 1:
             raise ValueError(f"{self.name}: plant_substeps={self.plant_substeps!r} must be an integer >= 1")
         if self.kind != "closed_loop":
@@ -293,8 +298,8 @@ class ScenarioSpec:
                 need_default("start_mode", why="no supervisor")
         else:
             need_default(*ctrl_fields, why="no controller in this kind")
-            need_default("plant_hold", "plant_substeps",
-                         why="only tune.simulate_closed_loop_estimated takes the plant switches")
+            need_default("plant_hold", "plant_substeps", "error_timing",
+                         why="only tune.simulate_closed_loop_estimated takes the plant and timing switches")
             if self.controller != "none" or self.estimator != "mekf":
                 raise ValueError(f"{self.name}: kind={self.kind!r} has no controller and no truth feedback")
         if self.kind == "estimation":

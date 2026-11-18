@@ -20,8 +20,10 @@ kinetic energy and the inertial angular-momentum vector are both conserved.
 
 PLANT STEP vs CONTROL STEP. ``plant_step`` advances the truth over one control
 step and is the one place the three simulators (here and in
-``scalar.control.tune``) integrate. Two switches, both defaulting to what the
-code did before they existed (bit for bit):
+``scalar.control.tune``) integrate. Two switches; here they default to what the
+code did before they existed (bit for bit), while the closed-loop simulator
+``tune.simulate_closed_loop_estimated`` defaults to the dipole held in 2
+substeps:
 
   * ``substeps`` (``plant_substeps``): the control step is integrated in N equal
     substeps. The quaternion update is second order in the substep, so its

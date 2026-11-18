@@ -8,6 +8,13 @@ Each function mirrors one script, case for case, with the same settings:
     experiment_4()  scripts/lqr_tune.py               (blocks A-D)
     experiment_5()  scripts/closed_loop_nn.py         (both controller designs)
 
+The closed-loop scenarios (experiments 4 and 5) pin ``tune.LEGACY_LOOP``: the
+torque held over the control step, one plant substep and the error recorded
+one step late, which is how the loop ran when the notes were written. The
+simulator and the other experiments default to the corrected loop (dipole
+held, 2 substeps, errors at the same instant); the scripts themselves now run
+the corrected loop too, so only these specs still reproduce the notes.
+
 ``SCRIPT_SEEDS`` records the seed each script hard-codes for a case; that seed,
 not the plan's assumed seed 2, is what produced the number in the doc.
 ``DOC_CHECKS`` lists every number the doc states for these experiments with its
@@ -26,6 +33,7 @@ from typing import Optional
 import numpy as np
 
 from ..attitude import quat_from_rotvec
+from ..control.tune import LEGACY_LOOP
 from .spec import ScenarioSpec
 
 __all__ = ["SEEDS", "PLAN_GATE_SEED", "DocCheck", "baseline_specs", "SCRIPT_SEEDS", "DOC_CHECKS",
@@ -157,8 +165,8 @@ def experiment_3():
 
 def experiment_4():
     specs, seeds, checks = [], {}, []
-    far = dict(experiment="4", q0=_Q_FAR, omega0_deg_s=_W_FAR)
-    near = dict(experiment="4", q0=_Q_NEAR, omega0_deg_s=_W_NEAR)
+    far = dict(experiment="4", q0=_Q_FAR, omega0_deg_s=_W_FAR, **LEGACY_LOOP)
+    near = dict(experiment="4", q0=_Q_NEAR, omega0_deg_s=_W_NEAR, **LEGACY_LOOP)
 
     # [A] time-invariant LQR + projection, truth feedback, no residual dipole, 3 orbits
     for q, w, r in projected_weight_draws(4, 0):
@@ -216,7 +224,7 @@ def experiment_5():
                 s = ScenarioSpec(name=f"e5_fine20_alb{a:g}", experiment="5", sun_unit="flight_like",
                                  sun_front=front, albedo_coeff=a, controller="periodic_lqr",
                                  theta_max_deg=th, omega_max_deg_s=wm, rho=rho, n_orbits=4,
-                                 m_res=_M_RES, q0=_Q_NEAR, omega0_deg_s=_W_NEAR)
+                                 m_res=_M_RES, q0=_Q_NEAR, omega0_deg_s=_W_NEAR, **LEGACY_LOOP)
                 specs.append(s)
                 seeds[s.key] = 2
                 if (th, wm, rho) == (10.0, 0.2, 0.3):

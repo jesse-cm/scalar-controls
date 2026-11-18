@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scalar.attitude import IDENTITY_QUAT, attitude_error_angle, dcm, propagate, to_body  # noqa: E402
 from scalar.constants import DEG  # noqa: E402
 from scalar.control.periodic_lqr import PeriodicLQR, TwoModeController  # noqa: E402
-from scalar.control.tune import actuators_from_matrix, simulate_closed_loop_estimated  # noqa: E402
+from scalar.control.tune import LEGACY_LOOP, actuators_from_matrix, simulate_closed_loop_estimated  # noqa: E402
 from scalar.dynamics import RigidBody, plant_step, simulate_controlled, simulate_free_tumble  # noqa: E402
 from scalar.environment.magfield import magnetic_field_eci  # noqa: E402
 from scalar.environment.orbit import CircularOrbit  # noqa: E402
@@ -89,7 +89,7 @@ def _detumble(n_steps, plant_hold="torque", plant_substeps=1):
     return tl
 
 
-# --------------------------------------------------------------------------- defaults are the original plant
+# --------------------------------------------------------------------------- the integrators' defaults are the original plant
 
 
 def _original_step(body, q, w, dt_, tau=None):
@@ -123,8 +123,13 @@ def test_defaults_reproduce_the_original_integrators_bit_for_bit():
         assert np.array_equal(tl.q[i + 1], q) and np.array_equal(tl.omega[i + 1], w)
     assert np.array_equal(taus[n], taus[n - 1])
 
+    # The closed loop defaults to the corrected plant; the baseline scenarios pin the original one.
     spec = ScenarioSpec(name="x")
-    assert (spec.plant_hold, spec.plant_substeps) == ("torque", 1)
+    assert (spec.plant_hold, spec.plant_substeps) == ("dipole", 2)
+    closed = [s for s in baseline_specs() if s.kind == "closed_loop"]
+    assert len(closed) == 32
+    assert all((s.plant_hold, s.plant_substeps, s.error_timing) == ("torque", 1, "legacy") for s in closed)
+    assert LEGACY_LOOP == {"plant_hold": "torque", "plant_substeps": 1, "error_timing": "legacy"}
 
 
 def test_substeps_are_the_same_as_a_shorter_plant_step():
@@ -216,17 +221,31 @@ def test_dipole_hold_with_a_fixed_field_and_no_rotation_is_the_torque_hold():
 # --------------------------------------------------------------------------- the closed-loop simulator and the harness
 
 
+@pytest.mark.parametrize("error_timing", ["aligned", "legacy"])
 @pytest.mark.parametrize("plant_hold,plant_substeps", [("torque", 1), ("torque", 3), ("dipole", 1), ("dipole", 2)])
-def test_closed_loop_simulator_steps_the_same_plant(plant_hold, plant_substeps):
-    """tune.simulate_closed_loop_estimated on the truth is simulate_controlled, switch for switch."""
+def test_closed_loop_simulator_steps_the_same_plant(plant_hold, plant_substeps, error_timing):
+    """tune.simulate_closed_loop_estimated on the truth is simulate_controlled, switch for switch.
+
+    Sample k is the truth at t_k (aligned) or at t_k + dt (legacy record)."""
     body, acts, orbit, jd0, _ = _control_setup()
     n = 300
     r = simulate_closed_loop_estimated(body, acts, orbit, jd0, q0=Q_CONTROL, omega0=W_CONTROL, duration=n,
                                        use_truth=True, controller=_damping_law(orbit, acts),
-                                       plant_hold=plant_hold, plant_substeps=plant_substeps)
+                                       plant_hold=plant_hold, plant_substeps=plant_substeps,
+                                       error_timing=error_timing)
     tl = _detumble(n, plant_hold, plant_substeps)
-    assert np.array_equal(r.rate_deg_s, [np.degrees(np.linalg.norm(w)) for w in tl.omega[1:]])
-    assert np.array_equal(r.pointing_err_deg, [np.degrees(attitude_error_angle(q, IDENTITY_QUAT)) for q in tl.q[1:]])
+    k = slice(0, n) if error_timing == "aligned" else slice(1, n + 1)
+    assert np.array_equal(r.rate_deg_s, [np.degrees(np.linalg.norm(w)) for w in tl.omega[k]])
+    assert np.array_equal(r.pointing_err_deg, [np.degrees(attitude_error_angle(q, IDENTITY_QUAT)) for q in tl.q[k]])
+
+
+def test_closed_loop_simulator_defaults_to_the_dipole_held_plant_in_two_substeps():
+    body, acts, orbit, jd0, _ = _control_setup()
+    n = 300
+    r = simulate_closed_loop_estimated(body, acts, orbit, jd0, q0=Q_CONTROL, omega0=W_CONTROL, duration=n,
+                                       use_truth=True, controller=_damping_law(orbit, acts))
+    tl = _detumble(n, "dipole", CONVERGED_SUBSTEPS)
+    assert np.array_equal(r.pointing_err_deg, [np.degrees(attitude_error_angle(q, IDENTITY_QUAT)) for q in tl.q[:n]])
 
 
 def test_spec_switches_reach_the_simulator():
@@ -243,14 +262,14 @@ def test_spec_switches_reach_the_simulator():
     ctrl, _ = runner._controller(on, plant, acts, acts, orbit, jd0)
     r = simulate_closed_loop_estimated(RigidBody(plant.inertia), acts, orbit, jd0, q0=Q_CONTROL, omega0=W_CONTROL,
                                        n_orbits=0.05, seed=2, controller=ctrl, m_res=np.array(on.m_res),
-                                       plant_hold="dipole", plant_substeps=2)
+                                       plant_hold="dipole", plant_substeps=2, error_timing="legacy")
     assert m_on.point_mean == np.mean(r.pointing_err_deg) and m_on.max_rate_deg_s == r.rate_deg_s.max()
     assert m_on.know_med_all == np.median(r.knowledge_err_deg)
 
 
 def test_switch_values_are_checked():
     body, acts, orbit, jd0, field = _control_setup()
-    for bad in (dict(plant_hold="coil"), dict(plant_substeps=0), dict(plant_substeps=2.0)):
+    for bad in (dict(plant_hold="coil"), dict(plant_substeps=0), dict(plant_substeps=2.0), dict(error_timing="late")):
         with pytest.raises(ValueError):
             simulate_closed_loop_estimated(body, acts, orbit, jd0, q0=Q_CONTROL, omega0=W_CONTROL, duration=2, **bad)
         with pytest.raises(ValueError):
@@ -265,6 +284,6 @@ def test_switch_values_are_checked():
     # Scenario, the burst campaign and the static dataset integrate their own truth: no switch to honour there
     for kind, kw in (("estimation", dict(knowledge_window="after_first_fifth")), ("sysid", {}), ("sun_vector", {})):
         ScenarioSpec(name="x", kind=kind, **kw).validate()
-        for on in (dict(plant_hold="dipole"), dict(plant_substeps=2)):
+        for on in (dict(plant_hold="torque"), dict(plant_substeps=1), dict(error_timing="legacy")):
             with pytest.raises(ValueError):
                 ScenarioSpec(name="x", kind=kind, **kw, **on).validate()

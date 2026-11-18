@@ -68,7 +68,9 @@ C. AGAINST THE STORED RUN. results/veml6031_baseline.json was produced by
    there, which the notes, section 12, identify with the no-sun-sensor row of
    section 9). In closed loop the sun sensor is worth more: without it the
    pointing mean is at least 0.8 deg above the stored cube run "B" (measured
-   1.72: 9.12 against 7.40).
+   1.72: 9.12 against 7.40). That loop holds the torque over the step and
+   records the error one step late, so these runs pin tune.LEGACY_LOOP; the
+   experiment-6 specs default to the corrected loop.
    "Same numbers" means same within floating-point drift across platforms,
    not bit-identical. The stored file was made on an arm64 Mac (numpy 2.2);
    on Linux x86 (Python 3.9, numpy 2.0.2) the no-sun run differed by 1.1e-6
@@ -101,6 +103,7 @@ sys.path.insert(0, os.path.join(_ROOT, "scripts"))
 
 import sun_realism as sr  # noqa: E402
 from scalar.constants import SOLAR_CONSTANT_1AU  # noqa: E402
+from scalar.control.tune import LEGACY_LOOP  # noqa: E402
 from scalar.harness import ScenarioSpec, baseline_specs, run_case  # noqa: E402
 from scalar.harness import runner  # noqa: E402
 from scalar.harness.baseline import tuned_controller_specs  # noqa: E402
@@ -359,7 +362,7 @@ def test_closed_loop_reproduces_the_stored_veml_run(config, stored, loses_pointi
     with open(os.path.join(_ROOT, "results", "veml6031_baseline.json")) as f:
         runs = json.load(f)["runs"]
     ref, cube = runs[stored]["seeds"]["100"], runs["B"]["seeds"]["100"]
-    m = run_case(sr.fine_base().replace(name="t_stored", **config), 100)
+    m = run_case(sr.fine_base().replace(name="t_stored", **LEGACY_LOOP, **config), 100)   # the stored file's loop
     if loses_pointing:
         # after pointing is lost the numbers depend on rounding; check what is robust (docstring, C)
         nosun = runs["VEML 25ms clip-drop"]["seeds"]["100"]

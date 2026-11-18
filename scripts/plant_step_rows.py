@@ -11,7 +11,10 @@ Only closed-loop scenarios have the switches, so the others are left out.
 
 The ledger has no column for the plant, so the scenario name carries it:
 ``e4D_acq120_mekf+plant_dipole_x2``. The row with the plain name is the
-baseline plant (torque held, one substep).
+baseline plant (torque held, one substep). The baseline scenarios also keep
+the legacy error timing (tune.LEGACY_LOOP) here, so these rows change the
+plant only. Experiments 6, 6L and hw already default to the dipole held in 2
+substeps.
 
 Default substep count: 2, the smallest count whose doubling moves the truth
 attitude of the cross-check's detumble orbit by less than 0.01 deg

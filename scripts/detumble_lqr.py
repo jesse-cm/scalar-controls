@@ -6,6 +6,10 @@
 Spins the 1U bus up to a tumble and runs the LQR controller (2 rods + 1 PCB
 coil) closed-loop over several orbits, printing the rate decay and (if
 matplotlib is present) saving a plot of |omega| and dipole usage to outputs/.
+
+The plant holds the commanded coil dipole over each control step (the torque
+follows the body field inside the step) in 2 substeps, as the closed-loop
+simulator does by default (scalar.dynamics.plant_step).
 """
 from __future__ import annotations
 
@@ -21,6 +25,7 @@ from scalar.actuators.magnetorquer import default_actuator_set  # noqa: E402
 from scalar.attitude import IDENTITY_QUAT  # noqa: E402
 from scalar.control.lqr import MagnetorquerLQR  # noqa: E402
 from scalar.dynamics import RigidBody, simulate_controlled  # noqa: E402
+from scalar.environment.magfield import magnetic_field_eci  # noqa: E402
 from scalar.environment.orbit import CircularOrbit  # noqa: E402
 from scalar.timeutil import julian_date  # noqa: E402
 
@@ -36,7 +41,16 @@ def main():
     n_orbits = 4
     dt_s = 2.0
     n = int(n_orbits * orbit.period / dt_s)
-    tl, taus = simulate_controlled(body, IDENTITY_QUAT, w0, dt_s, n, ctrl)
+
+    def dipole(t, q, w):                    # the controller logs m; the plant holds it over the step
+        ctrl(t, q, w)
+        return ctrl.m_hist[-1]
+
+    def field(t):
+        return magnetic_field_eci(orbit.position(t), jd0 + t / 86400.0)
+
+    tl, taus = simulate_controlled(body, IDENTITY_QUAT, w0, dt_s, n, plant_hold="dipole", plant_substeps=2,
+                                   dipole_fn=dipole, field_fn=field)
 
     w_deg = np.rad2deg(np.linalg.norm(tl.omega, axis=1))
     print(f"Actuators: 2 rods (0.2 A·m²) on X/Y + PCB coil (0.02 A·m²) on Z")

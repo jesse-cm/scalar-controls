@@ -7,6 +7,12 @@ Fine-pointing mode (periodic LQR, 256-bin schedule) closed on the MEKF at 1 Hz
 with a flight-like sun sensor unit under Earth albedo. Compares the analytic
 opposing-pair reconstruction with the MLP-B front end, for a stiff and a soft
 controller. Pointing error is truth vs target; the controller never sees truth.
+
+Runs the closed loop with its current defaults (coil dipole held over the step,
+2 plant substeps, errors sampled at one instant). The numbers in
+docs/learned-estimation-and-control.md came from the original loop; they are
+reproduced by the baseline scenarios, which pin it
+(``python3 scripts/matrix.py --gate``), not by this script.
 """
 from __future__ import annotations
 

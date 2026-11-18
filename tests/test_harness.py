@@ -1,7 +1,9 @@
 """Tests: the harness returns exactly what the wrapped simulators return, and the ledger keeps its fixed columns.
 
 Every equivalence test builds the reference the way the experiment script does
-(direct calls into scalar.*) on a shortened run, and compares with ``==``.
+(direct calls into scalar.*) on a shortened run, and compares with ``==``. The
+baseline scenarios of experiments 4 and 5 pin the loop as it ran for the notes
+(tune.LEGACY_LOOP), so their references pass it too.
 """
 import datetime as dt
 import os
@@ -16,7 +18,7 @@ from scalar.attitude import IDENTITY_QUAT, quat_from_rotvec  # noqa: E402
 from scalar.constants import DEG  # noqa: E402
 from scalar.control.periodic_lqr import (PeriodicLQR, TwoModeController, bryson_weights,  # noqa: E402
                                          periodic_lqr_schedule, quantize_schedule)
-from scalar.control.tune import (ClosedLoopResult, actuators_from_matrix,  # noqa: E402
+from scalar.control.tune import (LEGACY_LOOP, ClosedLoopResult, actuators_from_matrix,  # noqa: E402
                                  simulate_closed_loop_estimated, tune_lqr_weights)
 from scalar.dynamics import RigidBody  # noqa: E402
 from scalar.environment.orbit import CircularOrbit  # noqa: E402
@@ -179,7 +181,7 @@ def test_closed_loop_two_mode_equals_the_lqr_tune_call():
     P = orbit.period
     ctrl = TwoModeController(PeriodicLQR(_k256(body, acts, orbit, jd0), P, acts, IDENTITY_QUAT))
     r = simulate_closed_loop_estimated(body, acts, orbit, jd0, q0=Q_FAR, omega0=W_FAR, n_orbits=0.05, seed=2,
-                                       controller=ctrl, m_res=M_RES)                      # lqr_tune.py block [D]
+                                       controller=ctrl, m_res=M_RES, **LEGACY_LOOP)       # lqr_tune.py block [D]
     m = run_case(_spec("e4D_acq120_mekf").replace(n_orbits=0.05), 2)
     last = slice(-int(P), None)
     assert m.point_mean == np.mean(r.pointing_err_deg[last])
@@ -199,7 +201,7 @@ def test_closed_loop_flight_unit_equals_the_closed_loop_nn_call_and_scores_the_l
     ctrl = PeriodicLQR(_k256(body, acts, orbit, jd0), P, acts, IDENTITY_QUAT)
     r = simulate_closed_loop_estimated(body, acts, orbit, jd0, q0=Q_NEAR, omega0=W_NEAR, n_orbits=1.03, seed=2,
                                        controller=ctrl, m_res=M_RES, albedo_coeff=0.3, sun_sensor=sensor,
-                                       sun_front=None)                                    # closed_loop_nn.py
+                                       sun_front=None, **LEGACY_LOOP)                     # closed_loop_nn.py
     spec = _spec("e5_fine20_alb0.3 | mekf+analytic | periodic_lqr th=10deg w=0.2dps").replace(n_orbits=1.03)
     m = run_case(spec, 2)
     last = slice(-int(P), None)
@@ -238,13 +240,14 @@ def test_closed_loop_mlp_front_end_is_wired_like_closed_loop_nn():
     front = lambda c, E, nb, ds: mlp.reconstruct(c, E, sensor, np.concatenate([nb, [ds]]))   # noqa: E731
     r = simulate_closed_loop_estimated(body, acts, orbit, jd0, q0=Q_NEAR, omega0=W_NEAR, n_orbits=0.05, seed=2,
                                        controller=PeriodicLQR(_k256(body, acts, orbit, jd0), P, acts, IDENTITY_QUAT),
-                                       m_res=M_RES, albedo_coeff=0.3, sun_sensor=sensor, sun_front=front)
+                                       m_res=M_RES, albedo_coeff=0.3, sun_sensor=sensor, sun_front=front, **LEGACY_LOOP)
     assert m.point_mean == np.mean(r.pointing_err_deg) and m.know_med_all == np.median(r.knowledge_err_deg)
 
 
 def test_projected_lqr_specs_are_the_tuners_draws_and_runs():
     body, acts, _, orbit, jd0 = _closed_loop_setup()
-    out = tune_lqr_weights(body, acts, orbit, jd0, Q_FAR, W_FAR, n_candidates=4, n_orbits=0.005)   # lqr_tune.py [A]
+    out = tune_lqr_weights(body, acts, orbit, jd0, Q_FAR, W_FAR, n_candidates=4, n_orbits=0.005,  # lqr_tune.py [A]
+                           **LEGACY_LOOP)
     draws = projected_weight_draws(4, 0)
     assert sorted(draws) == sorted((w["q_weight"], w["w_weight"], w["r_weight"]) for _, w, _ in out)
     specs = [s for s in baseline_specs(["4"]) if s.controller == "projected_lqr"]
@@ -446,12 +449,13 @@ def test_experiment_6_is_the_tuned_files_and_only_runs_when_asked_for():
     assert listed("--experiments", "6L")[-1] == "2 scenarios"
     assert not any("x6orb" in line for line in listed("--experiments", "6"))
     assert listed("--experiments", "6", "--match", "s6_fine20_*_lqr_tuned_3mode |*")[-1] == "1 scenarios"
-    with contextlib.redirect_stderr(io.StringIO()):
-        try:
-            matrix.main(["--experiments", "6", "--gate", "--no-ledger"])
-            raise AssertionError("--gate accepted experiment 6")
-        except SystemExit as e:
-            assert e.code == 2
+    for exp in ("6", "6L", "hw", "5,6L"):                         # every experiment without numbers in the notes
+        with contextlib.redirect_stderr(io.StringIO()):
+            try:
+                matrix.main(["--experiments", exp, "--gate", "--no-ledger"])
+                raise AssertionError(f"--gate accepted experiment {exp}")
+            except SystemExit as e:
+                assert e.code == 2
 
 
 def test_gate_compares_at_the_docs_printed_precision_and_never_decides_loose_claims():

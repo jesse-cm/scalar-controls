@@ -12,6 +12,12 @@
 [C] Acquisition from 120 deg / 1 deg/s: rate damping (omega x B) until
     0.3 deg/s, then the periodic schedule. This is the C-26 supervisor.
 [D] [C] with the MEKF in the loop at 1 Hz, ideal sensors.
+
+Runs the closed loop with its current defaults (coil dipole held over the step,
+2 plant substeps, errors sampled at one instant). The numbers in
+docs/learned-estimation-and-control.md came from the original loop; they are
+reproduced by the baseline scenarios, which pin it
+(``python3 scripts/matrix.py --gate``), not by this script.
 """
 from __future__ import annotations
 

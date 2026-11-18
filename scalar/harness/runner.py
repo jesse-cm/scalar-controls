@@ -284,7 +284,7 @@ def _run_closed_loop(spec, seed):
         use_truth=(spec.estimator == "truth"), controller=ctrl, m_res=np.array(spec.m_res, float),
         sun_sensor=sensor, sun_front=_sun_front(spec, sensor), sigma_sun=spec.mekf_sigma_sun,
         magnetometer=mag, mag_calibration=cal, gyro=_gyro(spec),
-        plant_hold=spec.plant_hold, plant_substeps=spec.plant_substeps)
+        plant_hold=spec.plant_hold, plant_substeps=spec.plant_substeps, error_timing=spec.error_timing)
 
     n_last = int(orbit.period / spec.dt)        # the scripts' "last orbit" slice
     last = slice(-n_last, None)

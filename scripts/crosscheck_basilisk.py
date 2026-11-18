@@ -21,7 +21,9 @@ Our side is the repo code untouched: simulate_free_tumble / simulate_controlled
 (dynamics.py), the TwoModeController mode-1 damping law (periodic_lqr.py),
 actuators_from_matrix (tune.py), s3_coil_matrix, CircularOrbit, the dipole,
 sun_direction_eci / eclipse_factor and SunSensorArray.currents. The detumble
-path reproduces tune.simulate_closed_loop_estimated(use_truth=True) exactly.
+path reproduces tune.simulate_closed_loop_estimated(use_truth=True) exactly as
+it ran at the time of the cross-check (plant_hold="torque", plant_substeps=1;
+the simulator's default is now the dipole held in 2 substeps).
 scalar/control/lqr.py is imported by tune.py but nothing in it is called.
 
 The damping law is an input, not a thing under test: the Basilisk side runs the
@@ -168,7 +170,7 @@ def damping_controller(orbit, acts):
 def ours_truth(cfg, kind, n_sec, dt=None, hold="as-is"):
     """Truth attitude from our sim, returned at 1 Hz.
 
-    hold="as-is"   our simulate_controlled exactly as tune.py uses it: torque
+    hold="as-is"   our simulate_controlled exactly as tune.py used it: torque
                    computed once per control step and held in the body frame.
     hold="torque"  same law at 1 Hz, torque held, but integrated at ``dt``.
     hold="dipole"  same law at 1 Hz, the DIPOLE held and tau = m x B_body(t)
