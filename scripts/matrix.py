@@ -12,7 +12,9 @@
 Experiment 6 (each results/lqr_tuned*.json as the acquisition and the
 fine-pointing episode of rl_tune.evaluate) runs only when asked for by id; it
 has no number in the --gate table and --gate refuses it. The same holds for
-experiment hw (baseline.as_built_specs), the only one that reads hardware.json.
+experiment 6L (baseline.long_acquisition_specs) and experiment hw
+(baseline.as_built_specs), the only one that reads hardware.json: --gate
+accepts only the experiments of the baseline, 1-5.
 
 Rows go to results/ledger.csv (appended; the file is created with the fixed
 header). One row per (scenario, estimator, controller, seed-set, git hash,
@@ -40,7 +42,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scalar.harness import FIXED_METRICS, append_rows, ledger_row, run_cases  # noqa: E402
-from scalar.harness.baseline import select_specs  # noqa: E402
+from scalar.harness.baseline import baseline_specs, select_specs  # noqa: E402
 from scalar.harness.gate import format_gate, gate_seeds, gate_table  # noqa: E402
 from scalar.harness.ledger import current_git_hash, parse_seed_set  # noqa: E402
 from scalar.harness.runner import stderr_progress  # noqa: E402
@@ -79,8 +81,11 @@ def main(argv=None, select=None):
     a = ap.parse_args(argv)
 
     experiments = [e.strip() for e in a.experiments.split(",")]
-    if a.gate and ("6" in experiments or "hw" in experiments):
-        ap.error("--gate compares experiments 1-5 against the doc; experiments 6 and hw have no gate numbers")
+    gated = {s.experiment for s in baseline_specs()}       # the experiments with numbers in the notes
+    no_numbers = [e for e in experiments if e not in gated]
+    if a.gate and no_numbers:
+        ap.error(f"--gate compares experiments {', '.join(sorted(gated))} against the doc; "
+                 f"experiment(s) {', '.join(no_numbers)} have no gate numbers")
     specs = select(experiments)
     if a.match:
         specs = [s for s in specs if fnmatch.fnmatch(s.key, a.match)]
