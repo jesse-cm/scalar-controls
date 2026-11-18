@@ -11,7 +11,8 @@ Two distinct quantities (do not conflate — this was an explicit design point):
 Accuracy: the direction uses the Astronomical Almanac low-precision series
 (~0.01 deg), reported in the mean equator/equinox of date and used directly as
 ECI — far tighter than a coarse photodiode's several-degree error, so it is an
-effectively exact reference here.
+effectively exact reference here. "ECI" in this sim therefore means that
+of-date frame, not J2000 (scalar/attitude.py, FRAMES).
 """
 from __future__ import annotations
 

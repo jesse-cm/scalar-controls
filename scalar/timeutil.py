@@ -39,7 +39,9 @@ def gmst_rad(jd):
     """Greenwich Mean Sidereal Time [rad] for Julian Date ``jd`` (IAU 1982).
 
     This is the rotation angle of ECEF's +x (Greenwich meridian) about ECI +z,
-    i.e. the ECI->ECEF rotation is Rz(gmst).
+    i.e. the ECI->ECEF rotation is Rz(gmst). GMST is measured from the mean
+    equinox of date, so the ECI it starts from is the of-date frame
+    (scalar/attitude.py, FRAMES), not J2000.
     """
     t = (jd - JD_J2000) / JULIAN_CENTURY_DAYS
     gmst_sec = (67310.54841

@@ -12,7 +12,9 @@ latitude drifts (the combined secular perigee + mean-anomaly rate). At
 determination sim uses this is a small effect, but it matters for multi-day
 propagation and for the sun-geometry / eclipse phasing it slowly shifts.
 
-The propagator supplies (position, velocity) in ECI: position feeds the
+The propagator supplies (position, velocity) in ECI (the mean equator and
+equinox of date, scalar/attitude.py; the elements are referred to that frame,
+not to J2000): position feeds the
 eclipse test and the geomagnetic field, velocity is available for any
 velocity-frame diagnostics.
 """

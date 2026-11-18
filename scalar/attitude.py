@@ -6,8 +6,15 @@ follow.
 
 FRAMES
 ------
-ECI   Earth-Centered Inertial (treated as J2000/GCRF). Non-rotating; the frame
-      in which we express the truth sun vector, orbit position, and B-field.
+ECI   Earth-Centered, non-rotating: the mean equator and equinox of the
+      date (no nutation), NOT J2000/GCRF. It is the frame the sun series is
+      reported in (environment/sun.py) and the one Rz(GMST) carries to ECEF
+      (timeutil.gmst_rad); the frame in which we express the truth sun
+      vector, orbit position, and B-field. These are consistent with each
+      other, so nothing inside the sim depends on the choice. It differs from
+      J2000 by precession since 2000 (0.37 deg in 2026,
+      docs/crosscheck-basilisk.md, discrepancy A): an attitude or orbit taken
+      from, or handed to, a J2000 source must be rotated first.
 ECEF  Earth-Centered Earth-Fixed. Rotates with Earth about +z at OMEGA_EARTH;
       used only where geography matters (the dipole B-field tilt).
 BODY  Spacecraft body frame, fixed to the CubeSat. Sensors live here.
