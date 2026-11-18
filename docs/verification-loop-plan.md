@@ -377,9 +377,34 @@ rows of the three-mode file are superseded by these on the scoreboard.
    tuned files have not been re-tuned against the corrected loop.
 5. On the cluster the gate reads 108 of 123 matching and 11 not, against 117
    and 2 on the laptop that produced the notes, before and after these fixes
-   alike. The difference between machines was not investigated; the likely
-   cause is the network training and the closed-loop rows, which are
-   sensitive to the last digits.
+   alike. The two that fail on both are the ones named in the phase-0 entry.
+   The nine extra are all in experiment 5, stiff design, with albedo, at
+   seed 2 (cluster; laptop ledger row of 2026-10-24; notes):
+   - analytic front end, albedo 0.3 (line 137): pointing mean 113.9; 116.0;
+     116. Knowledge median 14.5; 9.62; 9.6. Knowledge p95 17.8; 14.4; 14.4.
+   - analytic, albedo 0.5 (line 138): pointing mean 103.0; 117.0; 117.
+     Pointing p95 171.6; 173.7; 174. Knowledge median 19.95; 18.28; 18.
+     Knowledge p95 24.8; 22.05; 22.
+   - MLP-B front end, albedo 0.3 (line 140): pointing p95 11.51; 11.57; 11.6.
+     Knowledge p95 3.985; 3.926; 3.9.
+
+   The seven analytic ones are runs that lose pointing on both machines (the
+   notes say so too); no network is involved. The two MLP-B ones hold
+   pointing; they move by 0.5 % and 1.5 %, across the rounding of the notes'
+   figure. The same split holds for every closed-loop row at the same seed:
+   runs that hold pointing without a network agree to the ledger's six digits
+   in pointing and knowledge; runs with a trained network (experiments 1 and
+   5) differ by up to 1.5 %; runs that lose pointing differ by up to tens of
+   degrees, truth-feedback runs of experiment 4 included (the projected-LQR
+   weight set that fails on both reads 88.93 and 89.11; "rates to 20°/s"
+   reads 12.2–23.2 and 21.1–28.9). So a lost run lets any small difference
+   grow, and the network, which each machine trains for itself with torch,
+   is the small difference that shows in runs that hold. What makes the
+   first difference is not established: the laptop rows come from older code
+   (`b5217a8+dirty`) as well as another machine, Python and libraries.
+   Hypothesis: torch training and floating-point rounding differ between the
+   machines. A gate run on the laptop at the cluster's commit would separate
+   machine from code.
 6. Also fixed: the frame is labelled as the mean equator and equinox of date
    in the code's comments (discrepancy A); `results/estimator_levers.json`
    records the seeds it holds; `matrix.py --gate` refuses every experiment

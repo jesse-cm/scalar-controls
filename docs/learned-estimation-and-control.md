@@ -5,10 +5,12 @@ Date: 2026-09-11, with dated additions through 2026-10-24. Committed on the
 written). Simulation only; none of it is flight code. All numbers are from the
 scripts named below. Since 2026-11-18 the closed loop has two fixes
 ([status entry](verification-loop-plan.md#2026-11-18--two-fixes-in-the-closed-loop)),
-so the closed-loop numbers of sections 4 and 5 reproduce with
-`python3 scripts/matrix.py --gate`, which runs the loop as it was, and no
-longer with `scripts/lqr_tune.py` and `scripts/closed_loop_nn.py`; the other
-numbers reproduce with `python3 scripts/<name>.py`. Where a later run
+so the closed-loop numbers of sections 4 and 5 reproduce only with the loop
+as it was: `python3 scripts/lqr_tune.py --legacy`,
+`python3 scripts/closed_loop_nn.py --legacy` or
+`python3 scripts/matrix.py --gate` (on the cluster, nine of section 5's
+figures come out differently; same entry, point 5); the other numbers
+reproduce with `python3 scripts/<name>.py`. Where a later run
 contradicted an earlier claim, the earlier text is left in place with a dated
 correction beside it.
 
