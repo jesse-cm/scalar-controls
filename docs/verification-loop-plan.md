@@ -430,6 +430,14 @@ day; [RESULTS.md](RESULTS.md) shows the current rows.
    term and the as-built rows are unchanged: the same front ends hold or
    lose pointing, with counts within a few seeds of the earlier rows.
 4. The full suite passes on the cluster at the same commit.
+5. Re-tuning against the corrected loop changes nothing. The same search
+   (population 12, 5 generations, training seeds 0–7, same criteria and
+   reward), started from `results/lqr_tuned_ms.json` and run on the corrected
+   loop, returned its starting point: no candidate in five generations beat
+   it, so no new file was added. On its training seeds the eight-seed file
+   reads, on the corrected loop, acquisition settle 2.94 h, fine pointing
+   mean 5.42° and p95 13.2°, the same as on the old loop to the digits
+   shown. Log: `results/rl_tune_v2.log`.
 
 ### Not started
 
