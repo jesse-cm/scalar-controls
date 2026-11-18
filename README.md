@@ -6,8 +6,9 @@ magnetometer and sun sensors, and turning it with magnetic coils using that
 estimate. It is a study tool that runs on a laptop. None of it is flight
 software and none of it has been checked against hardware.
 
-Results: [docs/RESULTS.md](docs/RESULTS.md). Map of every file and every open
-question: [docs/HANDOFF.md](docs/HANDOFF.md).
+Results: [docs/RESULTS.md](docs/RESULTS.md). What to do next, step by step:
+[docs/HANDOFF.md, What to do next](docs/HANDOFF.md#what-to-do-next). Map of
+every file: [docs/HANDOFF.md](docs/HANDOFF.md).
 
 ## 1. Working with the code
 
