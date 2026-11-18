@@ -4,14 +4,27 @@
   "seeds": [
    100,
    101,
-   102
+   102,
+   103,
+   104,
+   105,
+   106,
+   107,
+   108,
+   109,
+   110,
+   111,
+   112,
+   113,
+   114
   ],
   "sigma_u_true": 1e-05,
   "duty": 0.6,
   "mlp_data_seed": 0,
   "mlp_unit_seed": 1,
   "metrics": "last of 3 orbits at the 1 Hz control instants; see script docstring",
-  "duty_model": "coils OFF first (1-d) s, ON last d s of each control second; mag read only in OFF window; not modelled in scalar/ (added here)"
+  "duty_model": "coils OFF first (1-d) s, ON last d s of each control second; mag read only in OFF window; not modelled in scalar/ (added here)",
+  "note": "2026-11-18: meta.seeds corrected from [100, 101, 102] to 100-114. scripts/estimator_levers.py wrote its default seed list here whatever --seeds was given; every one of the 30 runs in this file holds seeds 100-114 (checked from the file). Nothing else in the file was changed."
  },
  "runs": {
   "L3 gyro 4Hz": {

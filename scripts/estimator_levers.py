@@ -296,15 +296,21 @@ def main():
             out = json.load(fh)
     except (FileNotFoundError, json.JSONDecodeError):
         out = {"meta": {}, "runs": {}}
-    out["meta"] = dict(params=PARAMS_PATH, seeds=list(SEEDS), sigma_u_true=SIGMA_U_TRUE,
-                       duty=DUTY, mlp_data_seed=MLP_DATA_SEED, mlp_unit_seed=MLP_UNIT_SEED,
-                       metrics="last of 3 orbits at the 1 Hz control instants; see script docstring",
-                       duty_model="coils OFF first (1-d) s, ON last d s of each control second; "
-                                  "mag read only in OFF window; not modelled in scalar/ (added here)")
     for nm, s, r in done:
         out["runs"].setdefault(nm, {"config": cfgs[nm], "seeds": {}})
         out["runs"][nm]["config"] = cfgs[nm]
         out["runs"][nm]["seeds"][str(s)] = r
+    # the seeds the file holds (it keeps runs from earlier invocations), not the default --seeds
+    held = {nm: sorted(int(sd) for sd in run["seeds"]) for nm, run in out["runs"].items()}
+    all_seeds = sorted(set().union(*held.values())) if held else []
+    out["meta"] = dict(params=PARAMS_PATH, seeds=all_seeds, sigma_u_true=SIGMA_U_TRUE,
+                       duty=DUTY, mlp_data_seed=MLP_DATA_SEED, mlp_unit_seed=MLP_UNIT_SEED,
+                       metrics="last of 3 orbits at the 1 Hz control instants; see script docstring",
+                       duty_model="coils OFF first (1-d) s, ON last d s of each control second; "
+                                  "mag read only in OFF window; not modelled in scalar/ (added here)")
+    partial = {nm: sd for nm, sd in held.items() if sd != all_seeds}
+    if partial:
+        out["meta"]["seeds_partial_runs"] = partial     # runs that lack some of meta.seeds
     with open(OUT_JSON, "w") as fh:
         json.dump(out, fh, indent=1)
 
