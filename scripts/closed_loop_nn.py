@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
 """Experiment 5: the whole chain — learned sun front end -> MEKF -> periodic LQR.
 
-    python3 scripts/closed_loop_nn.py
+    python3 scripts/closed_loop_nn.py            # the corrected loop (current defaults)
+    python3 scripts/closed_loop_nn.py --legacy   # the loop of the notes: prints section 5's numbers
 
 Fine-pointing mode (periodic LQR, 256-bin schedule) closed on the MEKF at 1 Hz
 with a flight-like sun sensor unit under Earth albedo. Compares the analytic
 opposing-pair reconstruction with the MLP-B front end, for a stiff and a soft
 controller. Pointing error is truth vs target; the controller never sees truth.
 
-Runs the closed loop with its current defaults (coil dipole held over the step,
-2 plant substeps, errors sampled at one instant). The numbers in
-docs/learned-estimation-and-control.md came from the original loop; they are
-reproduced by the baseline scenarios, which pin it
-(``python3 scripts/matrix.py --gate``), not by this script.
+Without ``--legacy`` the closed loop runs with its current defaults (coil
+dipole held over the step, 2 plant substeps, errors sampled at one instant).
+The numbers of section 5 of docs/learned-estimation-and-control.md came from
+the original loop (torque held over the step, 1 substep, errors recorded one
+step late). ``--legacy`` passes that loop (``tune.LEGACY_LOOP``) to every
+closed-loop run here, and the script then prints those numbers again, as do
+the baseline scenarios of ``python3 scripts/matrix.py --gate``. The MLP-B
+front end is trained with torch on the machine that runs the script, so its
+rows can differ in the last printed digit between machines.
 """
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 import os
 import sys
@@ -28,7 +34,7 @@ from scalar.attitude import IDENTITY_QUAT, quat_from_rotvec  # noqa: E402
 from scalar.constants import DEG  # noqa: E402
 from scalar.control.periodic_lqr import (PeriodicLQR, bryson_weights,  # noqa: E402
                                          periodic_lqr_schedule, quantize_schedule)
-from scalar.control.tune import actuators_from_matrix, simulate_closed_loop_estimated  # noqa: E402
+from scalar.control.tune import LEGACY_LOOP, actuators_from_matrix, simulate_closed_loop_estimated  # noqa: E402
 from scalar.dynamics import RigidBody  # noqa: E402
 from scalar.environment.orbit import CircularOrbit  # noqa: E402
 from scalar.learning.sun_mlp import flight_like_sensor, train_sun_mlp  # noqa: E402
@@ -36,7 +42,17 @@ from scalar.sysid.magnetorquer_id import s3_coil_matrix  # noqa: E402
 from scalar.timeutil import julian_date  # noqa: E402
 
 
-def main():
+def parse_args(argv=None):
+    ap = argparse.ArgumentParser(description="Experiment 5: learned sun front end -> MEKF -> periodic LQR.")
+    ap.add_argument("--legacy", action="store_true",
+                    help="run the loop of the notes (tune.LEGACY_LOOP) and print section 5's numbers")
+    return ap.parse_args(argv)
+
+
+def main(argv=None):
+    loop = dict(LEGACY_LOOP) if parse_args(argv).legacy else {}
+    print("Closed loop:", "legacy (tune.LEGACY_LOOP, as in the notes)" if loop
+          else "current defaults (dipole held, 2 substeps, errors at one instant)")
     body = RigidBody(); M, i_max = s3_coil_matrix(); acts = actuators_from_matrix(M, i_max)
     orbit = CircularOrbit(inclination=98.61 * DEG); jd0 = julian_date(dt.datetime(2026, 9, 11, 12))
     P = orbit.period
@@ -65,7 +81,7 @@ def main():
                 ctrl = PeriodicLQR(K256, P, acts, IDENTITY_QUAT)
                 r = simulate_closed_loop_estimated(body, acts, orbit, jd0, q0=q0, omega0=w0, n_orbits=4,
                                                    seed=2, controller=ctrl, m_res=m_res,
-                                                   albedo_coeff=albedo, sun_sensor=sensor, sun_front=front)
+                                                   albedo_coeff=albedo, sun_sensor=sensor, sun_front=front, **loop)
                 last = slice(-int(P), None)
                 pe, ke = r.pointing_err_deg[last], r.knowledge_err_deg[last]
                 print(f"{dname:<36} {fname:<16} {albedo:>6.1f} {np.mean(pe):>11.2f} {np.percentile(pe,95):>7.2f} "

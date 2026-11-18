@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Experiment 4: LQR for the identified coils, with the field inside the design.
 
-    python3 scripts/lqr_tune.py
+    python3 scripts/lqr_tune.py              # the corrected loop (current defaults)
+    python3 scripts/lqr_tune.py --legacy     # the loop of the notes: prints section 4's numbers
 
 [A] The existing time-invariant LQR + projection (lqr.py) cannot point, even
     sign-corrected: the along-B part of every torque request is discarded and
@@ -13,14 +14,17 @@
     0.3 deg/s, then the periodic schedule. This is the C-26 supervisor.
 [D] [C] with the MEKF in the loop at 1 Hz, ideal sensors.
 
-Runs the closed loop with its current defaults (coil dipole held over the step,
-2 plant substeps, errors sampled at one instant). The numbers in
-docs/learned-estimation-and-control.md came from the original loop; they are
-reproduced by the baseline scenarios, which pin it
-(``python3 scripts/matrix.py --gate``), not by this script.
+Without ``--legacy`` the closed loop runs with its current defaults (coil
+dipole held over the step, 2 plant substeps, errors sampled at one instant).
+The numbers of section 4 of docs/learned-estimation-and-control.md came from
+the original loop (torque held over the step, 1 substep, errors recorded one
+step late). ``--legacy`` passes that loop (``tune.LEGACY_LOOP``) to every
+closed-loop run here, and the script then prints those numbers again, as do
+the baseline scenarios of ``python3 scripts/matrix.py --gate``.
 """
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 import os
 import sys
@@ -33,8 +37,8 @@ from scalar.attitude import IDENTITY_QUAT, quat_from_rotvec  # noqa: E402
 from scalar.constants import DEG  # noqa: E402
 from scalar.control.periodic_lqr import (PeriodicLQR, TwoModeController, bryson_weights,  # noqa: E402
                                          periodic_lqr_schedule, quantize_schedule)
-from scalar.control.tune import (actuators_from_matrix, simulate_closed_loop_estimated,  # noqa: E402
-                                 tune_lqr_weights)
+from scalar.control.tune import (LEGACY_LOOP, actuators_from_matrix,  # noqa: E402
+                                 simulate_closed_loop_estimated, tune_lqr_weights)
 from scalar.dynamics import RigidBody  # noqa: E402
 from scalar.environment.orbit import CircularOrbit  # noqa: E402
 from scalar.sysid.magnetorquer_id import s3_coil_matrix  # noqa: E402
@@ -47,7 +51,17 @@ def stats(r, P):
             f"p95 {np.percentile(last,95):6.2f} | max rate {r.rate_deg_s.max():5.2f} deg/s | sat {r.sat_frac:.2f}")
 
 
-def main():
+def parse_args(argv=None):
+    ap = argparse.ArgumentParser(description="Experiment 4: LQR for the identified coils (blocks A-D).")
+    ap.add_argument("--legacy", action="store_true",
+                    help="run the loop of the notes (tune.LEGACY_LOOP) and print section 4's numbers")
+    return ap.parse_args(argv)
+
+
+def main(argv=None):
+    loop = dict(LEGACY_LOOP) if parse_args(argv).legacy else {}
+    print("Closed loop:", "legacy (tune.LEGACY_LOOP, as in the notes)" if loop
+          else "current defaults (dipole held, 2 substeps, errors at one instant)")
     body = RigidBody(); M, i_max = s3_coil_matrix(); acts = actuators_from_matrix(M, i_max)
     orbit = CircularOrbit(inclination=98.61 * DEG); jd0 = julian_date(dt.datetime(2026, 9, 11, 12))
     P = orbit.period
@@ -58,7 +72,8 @@ def main():
           f"residual dipole {np.linalg.norm(m_res)*1e3:.1f} mA m^2")
 
     print("\n[A] Time-invariant LQR + projection (lqr.py, sign-corrected), 4 random weight sets, 120 deg start:")
-    for score, w, r in tune_lqr_weights(body, acts, orbit, jd0, q_far, w_far, n_candidates=4, n_orbits=3):
+    for score, w, r in tune_lqr_weights(body, acts, orbit, jd0, q_far, w_far, n_candidates=4, n_orbits=3,
+                                     **loop):
         print(f"   q={w['q_weight']:.2g} w={w['w_weight']:.2g} r={w['r_weight']:.2g}: {stats(r, P)}")
 
     print("\n[B] Periodic LQR near target (20 deg, 0.1 deg/s), Bryson 10 deg / 0.2 deg/s, truth feedback, 4 orbits:")
@@ -70,7 +85,8 @@ def main():
         for nb in (None, 256, 64):
             Kq = K if nb is None else quantize_schedule(K, nb)
             r = simulate_closed_loop_estimated(body, acts, orbit, jd0, q0=q_near, omega0=w_near, n_orbits=4,
-                                               use_truth=True, controller=PeriodicLQR(Kq, P, acts, IDENTITY_QUAT), m_res=m_res)
+                                               use_truth=True, controller=PeriodicLQR(Kq, P, acts, IDENTITY_QUAT), m_res=m_res,
+                                               **loop)
             print(f"   rho={rho:<4} bins={str(nb or len(K)):<5} ({Kq.size*4/1024:6.1f} KB): {stats(r, P)}")
 
     print("\n[C] Acquisition from 120 deg / 1 deg/s, 256-bin schedule, truth feedback, 6 orbits:")
@@ -80,13 +96,14 @@ def main():
             lqr = PeriodicLQR(K256, P, acts, IDENTITY_QUAT)
             ctrl = TwoModeController(lqr) if two else lqr
             r = simulate_closed_loop_estimated(body, acts, orbit, jd0, q0=q_far, omega0=w_far, n_orbits=6,
-                                               use_truth=True, controller=ctrl, m_res=m_res)
+                                               use_truth=True, controller=ctrl, m_res=m_res, **loop)
             print(f"   rho={rho:<4} {'damp->LQR' if two else 'LQR only ':<9}: {stats(r, P)}")
 
     print("\n[D] Two-mode, rho 0.3, 256 bins, MEKF in the loop at 1 Hz (ideal sensors), 6 orbits:")
     K256 = quantize_schedule(schedules[0.3], 256)
     r = simulate_closed_loop_estimated(body, acts, orbit, jd0, q0=q_far, omega0=w_far, n_orbits=6, seed=2,
-                                       controller=TwoModeController(PeriodicLQR(K256, P, acts, IDENTITY_QUAT)), m_res=m_res)
+                                       controller=TwoModeController(PeriodicLQR(K256, P, acts, IDENTITY_QUAT)), m_res=m_res,
+                                       **loop)
     last = slice(-int(P), None)
     print(f"   {stats(r, P)} | knowledge median {np.median(r.knowledge_err_deg[last]):.2f} deg")
     try:
