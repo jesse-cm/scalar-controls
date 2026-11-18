@@ -1,0 +1,258 @@
+# Result rows made on GitHub's machines instead of a laptop or the cluster. Started by hand only:
+# Actions tab -> simulate -> Run workflow (or: gh workflow run simulate.yml -f run='...' -f seeds=0-39).
+#
+# It runs ONE documented row command (scripts/matrix.py or a helper script that goes through it)
+# with --workers equal to the runner's cores, writes the rows with --ledger to a file outside the
+# checkout (so the commit id in each row stays clean) and --per-seed beside it, uploads both as
+# an artifact and shows the rows in the job summary. It commits nothing. A person adds the rows:
+#
+#   gh run download <run id> -D ~/scalar-out/<name>
+#   tail -n +2 ~/scalar-out/<name>/*/rows.csv >> results/ledger.csv    # the rows, without the header
+#   python3 scripts/report.py --write                                  # regenerates docs/RESULTS.md
+#   git commit results/ledger.csv docs/RESULTS.md                      # see docs/HANDOFF.md
+#
+# Rows from GitHub's machines, the cluster and a laptop differ in the last digits, and acquisition
+# results visibly; the ledger has no column saying which machine made a row, so the run_info.txt
+# in the artifact records it (docs/verification-loop-plan.md, "where runs are made").
+#
+# TIME. GitHub stops any job at 6 hours; this one stops the run at 5 h 30 min, then still uploads
+# the log. A 40-seed closed-loop run of one experiment took 13 to 50 minutes on 8 slow cluster
+# cores; a standard runner has 4. Split a big request so each part fits:
+#   - by experiment: one run per id (1, 2, 3, 4, 5, 6, ...), never the whole baseline at once;
+#   - by --match: e.g. 'e4A*', 'e4B*', ... or '*acq120*' and '*fine20*' as separate runs;
+#   - by seeds: 0-19 and 20-39 run separately give two rows, not one 40-seed row, so split by
+#     seeds only for a check, not for a ledger row.
+# Each part's rows are added to the ledger the same way.
+
+name: simulate
+
+on:
+  # TEMPORARY trial trigger, to be removed: a push to ci-setup runs one small request
+  push:
+    branches: [ci-setup]
+  workflow_dispatch:
+    inputs:
+      run:
+        description: "Which row command (scripts/; each script's docstring says what it runs)"
+        type: choice
+        required: true
+        default: "matrix.py --experiments 6"
+        options:
+          - "matrix.py --experiments 1"
+          - "matrix.py --experiments 2"
+          - "matrix.py --experiments 3"
+          - "matrix.py --experiments 4"
+          - "matrix.py --experiments 5"
+          - "matrix.py --experiments 6"
+          - "matrix.py --experiments 6L"
+          - "matrix.py --experiments hw"
+          - "mag_realism.py (the four 1c rows)"
+          - "mag_realism.py --experiments 1c-parts"
+          - "gyro_realism.py (the three 1h rows)"
+          - "gyro_realism.py --experiments 1h-parts"
+          - "gyro_realism.py --experiments 1h-notemp"
+          - "gyro_realism.py --bias-table (a printed table, no rows)"
+          - "sun_realism.py --experiments 1f"
+          - "sun_realism.py --experiments 1f-normals"
+          - "sun_realism.py --experiments 1f-albedo"
+          - "plant_step_rows.py (closed-loop baseline, plant switches below)"
+      seeds:
+        description: "Seed set: one number or a range such as 0-39 or 100-114"
+        type: string
+        required: true
+        default: "0-39"
+      match:
+        description: "Optional --match glob on 'scenario | estimator | controller', e.g. *3mode* or e4D* (letters, digits and _ . * ? + = [ ] - only)"
+        type: string
+        required: false
+        default: ""
+      plant_hold:
+        description: "plant_step_rows.py only: --plant-hold"
+        type: choice
+        required: false
+        default: "dipole"
+        options: ["dipole", "torque"]
+      plant_substeps:
+        description: "plant_step_rows.py only: --plant-substeps (1-99)"
+        type: string
+        required: false
+        default: "2"
+
+permissions:
+  contents: read
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      # dispatch inputs reach the shell only through these variables, and are checked before use
+      RUN_CHOICE: ${{ github.event_name == 'push' && 'matrix.py --experiments 6' || inputs.run }}   # TEMPORARY
+      SEEDS: ${{ github.event_name == 'push' && '0-1' || inputs.seeds }}   # TEMPORARY
+      MATCH: ${{ github.event_name == 'push' && '*3mode*' || inputs.match }}   # TEMPORARY
+      PLANT_HOLD: ${{ inputs.plant_hold }}
+      PLANT_SUBSTEPS: ${{ inputs.plant_substeps }}
+      # as scripts/cluster/remote_run.sh: one thread per worker process, no .pyc files in the checkout
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - name: Check the request
+        id: req
+        run: |
+          set -euo pipefail
+          fail() { echo "::error title=Bad input::$1"; exit 2; }
+
+          re_seeds='^[0-9]{1,4}(-[0-9]{1,4})?$'
+          re_match='^[][A-Za-z0-9_.*?+=][][A-Za-z0-9_.*?+=-]{0,119}$'
+          [[ "$SEEDS" =~ $re_seeds ]] \
+            || fail "seeds must be one number or a range like 0-39 or 100-114 (got something else)"
+          if [[ "$SEEDS" == *-* ]]; then
+            lo=$((10#${SEEDS%-*})); hi=$((10#${SEEDS#*-}))
+            (( lo <= hi )) || fail "seeds: the range must go up (got $SEEDS)"
+          fi
+          if [ -n "$MATCH" ]; then
+            [[ "$MATCH" =~ $re_match ]] \
+              || fail "match may use only letters, digits and _ . * ? + = [ ] - (not first), at most 120 characters"
+          fi
+
+          OUT="$RUNNER_TEMP/simulate-out"                   # outside the checkout
+          echo "OUT=$OUT" >> "$GITHUB_ENV"
+          args=(); slug=""
+          case "$RUN_CHOICE" in
+            "matrix.py --experiments 1")    args=(scripts/matrix.py --experiments 1);  slug=matrix-1 ;;
+            "matrix.py --experiments 2")    args=(scripts/matrix.py --experiments 2);  slug=matrix-2 ;;
+            "matrix.py --experiments 3")    args=(scripts/matrix.py --experiments 3);  slug=matrix-3 ;;
+            "matrix.py --experiments 4")    args=(scripts/matrix.py --experiments 4);  slug=matrix-4 ;;
+            "matrix.py --experiments 5")    args=(scripts/matrix.py --experiments 5);  slug=matrix-5 ;;
+            "matrix.py --experiments 6")    args=(scripts/matrix.py --experiments 6);  slug=matrix-6 ;;
+            "matrix.py --experiments 6L")   args=(scripts/matrix.py --experiments 6L); slug=matrix-6L ;;
+            "matrix.py --experiments hw")   args=(scripts/matrix.py --experiments hw); slug=matrix-hw ;;
+            "mag_realism.py (the four 1c rows)")      args=(scripts/mag_realism.py); slug=mag-1c ;;
+            "mag_realism.py --experiments 1c-parts")  args=(scripts/mag_realism.py --experiments 1c-parts); slug=mag-1c-parts ;;
+            "gyro_realism.py (the three 1h rows)")    args=(scripts/gyro_realism.py); slug=gyro-1h ;;
+            "gyro_realism.py --experiments 1h-parts")  args=(scripts/gyro_realism.py --experiments 1h-parts); slug=gyro-1h-parts ;;
+            "gyro_realism.py --experiments 1h-notemp") args=(scripts/gyro_realism.py --experiments 1h-notemp); slug=gyro-1h-notemp ;;
+            "gyro_realism.py --bias-table (a printed table, no rows)") args=(scripts/gyro_realism.py --bias-table); slug=gyro-bias-table ;;
+            "sun_realism.py --experiments 1f")         args=(scripts/sun_realism.py --experiments 1f); slug=sun-1f ;;
+            "sun_realism.py --experiments 1f-normals") args=(scripts/sun_realism.py --experiments 1f-normals); slug=sun-1f-normals ;;
+            "sun_realism.py --experiments 1f-albedo")  args=(scripts/sun_realism.py --experiments 1f-albedo); slug=sun-1f-albedo ;;
+            "plant_step_rows.py (closed-loop baseline, plant switches below)")
+              [[ "$PLANT_HOLD" == dipole || "$PLANT_HOLD" == torque ]] || fail "plant_hold must be dipole or torque"
+              [[ "$PLANT_SUBSTEPS" =~ ^[1-9][0-9]?$ ]] || fail "plant_substeps must be a whole number from 1 to 99"
+              args=(scripts/plant_step_rows.py --plant-hold "$PLANT_HOLD" --plant-substeps "$PLANT_SUBSTEPS")
+              slug="plant-$PLANT_HOLD-x$PLANT_SUBSTEPS" ;;
+            *) fail "run: not one of the listed commands" ;;
+          esac
+
+          if [ "$slug" = gyro-bias-table ]; then
+            [ -z "$MATCH" ] || fail "--bias-table takes no --match"
+            args+=(--seeds "$SEEDS")                       # prints a table; no ledger, no per-seed file
+          else
+            args+=(--seeds "$SEEDS")
+            [ -z "$MATCH" ] || args+=(--match "$MATCH")
+            args+=(--ledger "$OUT/rows.csv" --per-seed "$OUT/per_seed.csv")
+          fi
+          mkdir -p "$OUT"
+          printf '%s\0' "${args[@]}" > "$RUNNER_TEMP/argv"
+          echo "slug=$slug" >> "$GITHUB_OUTPUT"
+          echo "Request accepted: ${args[*]}"
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install requirements (torch CPU-only)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r requirements.txt
+
+      - name: List the scenarios
+        env:
+          SLUG: ${{ steps.req.outputs.slug }}
+        run: |
+          set -euo pipefail
+          mapfile -d '' -t args < "$RUNNER_TEMP/argv"
+          if [ "$SLUG" != gyro-bias-table ]; then
+            # the same selection with --list in front of the run's own arguments: runs nothing
+            python "${args[0]}" --list "${args[@]:1}"
+          fi
+
+      - name: Run
+        timeout-minutes: 330
+        env:
+          SLUG: ${{ steps.req.outputs.slug }}
+        run: |
+          set -euo pipefail
+          mapfile -d '' -t args < "$RUNNER_TEMP/argv"
+          workers=$(nproc)
+          [ -z "$(git status --porcelain)" ] || { echo "::error::checkout is not clean"; git status --short; exit 3; }
+          {
+            echo "machine: GitHub-hosted runner, $RUNNER_OS $(uname -m), ${workers} cores, $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | sed 's/^ *//')"
+            echo "python: $(python --version 2>&1), numpy $(python -c 'import numpy; print(numpy.__version__)'), scipy $(python -c 'import scipy; print(scipy.__version__)')"
+            echo "commit: $(git rev-parse HEAD)"
+            echo "workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "command: python ${args[*]} --workers $workers"
+            echo "start: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } | tee "$OUT/run_info.txt"
+          t0=$(date +%s)
+          if [ "$SLUG" = gyro-bias-table ]; then
+            python "${args[@]}" --workers "$workers" 2> >(tee "$OUT/run.log" >&2) | tee "$OUT/bias_table.txt"
+          else
+            python "${args[@]}" --workers "$workers" 2>&1 | tee "$OUT/run.log"
+          fi
+          {
+            echo "end: $(date -u +%Y-%m-%dT%H:%M:%SZ), run wall $(( $(date +%s) - t0 )) s"
+            echo "checkout after the run: $(git status --porcelain | wc -l) changed files"
+          } | tee -a "$OUT/run_info.txt"
+
+      - name: Rows to the job summary
+        if: always()
+        env:
+          SLUG: ${{ steps.req.outputs.slug }}
+        run: |
+          {
+            echo "### simulate: ${SLUG:-request refused}, seeds $SEEDS${MATCH:+, --match $MATCH}"
+            echo
+            if [ -f "$OUT/run_info.txt" ]; then echo '```'; cat "$OUT/run_info.txt"; echo '```'; fi
+            if [ -f "$OUT/rows.csv" ]; then
+              echo "#### Rows ($(( $(wc -l < "$OUT/rows.csv") - 1 ))), as they would be appended to results/ledger.csv"
+              echo
+              python - "$OUT/rows.csv" <<'PY'
+          import csv, sys
+          cols = ["scenario", "estimator", "seed_set", "git_hash", "point_mean__med", "point_p95__med",
+                  "settle_h__med", "know_med_all__med", "diverged__frac"]
+          rows = list(csv.DictReader(open(sys.argv[1])))
+          print("| " + " | ".join(cols) + " |")
+          print("|" + "---|" * len(cols))
+          for r in rows:
+              print("| " + " | ".join(r.get(c, "") for c in cols) + " |")
+          PY
+              echo
+              echo "Full rows (header first):"
+              echo '```csv'; cat "$OUT/rows.csv"; echo '```'
+              echo "Per-seed file: $(( $(wc -l < "$OUT/per_seed.csv" 2>/dev/null || echo 1) - 1 )) lines, in the artifact."
+            elif [ -f "$OUT/bias_table.txt" ]; then
+              echo '```'; cat "$OUT/bias_table.txt"; echo '```'
+            else
+              echo "No rows were written. The last lines of the log:"
+              echo '```'; tail -n 40 "$OUT/run.log" 2>/dev/null; echo '```'
+            fi
+            echo
+            echo "To add them: download the artifact (gh run download $GITHUB_RUN_ID), append rows.csv without its header to results/ledger.csv, run python3 scripts/report.py --write, commit both (docs/HANDOFF.md, Where heavy runs go). Rows from this machine differ from cluster and laptop rows in the last digits."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rows-${{ steps.req.outputs.slug }}-run${{ github.run_number }}
+          path: ${{ runner.temp }}/simulate-out/
+          if-no-files-found: warn
