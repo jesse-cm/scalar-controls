@@ -153,6 +153,19 @@ tail -n +2 ~/scalar-out/hw-rows/rows.csv >> results/ledger.csv    # the rows, wi
 - Measured during the handover: one closed-loop case took about five times longer per core there than on a recent laptop.
 - Numbers from two machines differ in the last digits, and acquisition results visibly; compare rows from one machine only ([where runs are made](verification-loop-plan.md#2026-10-24--where-runs-are-made-and-what-that-does-to-the-rows)).
 
+The second route needs no cluster account: the `simulate` workflow runs one
+documented row command on GitHub's machines (Actions tab, `simulate`, Run
+workflow; or `gh workflow run simulate.yml -f run='matrix.py --experiments hw' -f seeds=0-39`).
+It runs the commit the workflow is started on and commits nothing; its
+artifact holds `rows.csv`, `per_seed.csv`, the log and `run_info.txt` (which
+machine, which commit). Add the rows as above, then `report.py --write` and
+commit. One job stops after 5 h 30 min on 4 cores: split a big request by
+experiment or by `--match`, as the header of `.github/workflows/simulate.yml`
+says. Rows from GitHub's machines, the cluster and a laptop differ in the last
+digits; the ledger has no column saying which made a row, so say it in the
+commit message. The `tests` workflow runs the whole suite on Python 3.9 and
+3.13 on every push and pull request.
+
 ## Where things are
 
 ### Code: `scalar/`
@@ -200,6 +213,7 @@ The right-hand column is the first line of each script's own description.
 | `estimator_levers.py` | Estimator-side levers on the gyro-bias "attitude-estimate path". |
 | `veml6031_baseline.py` | Config B with the real sun sensor (7x VEML6031X00) instead of the ideal cube. |
 | `cluster/remote_run.sh`, `cluster/remote_wait.sh` | Submit one simulation command to the WashU engineering cluster; wait for it and fetch its outputs ([Where heavy runs go](#where-heavy-runs-go)). |
+| `.github/workflows/tests.yml`, `.github/workflows/simulate.yml` (repository root) | GitHub Actions: the test suite on every push and pull request; one row command on GitHub's machines, started by hand ([Where heavy runs go](#where-heavy-runs-go)). |
 
 Which section of the notes reports each script's result: the
 [Files list](learned-estimation-and-control.md#files) in the notes.
