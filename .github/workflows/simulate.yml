@@ -103,6 +103,8 @@ jobs:
         run: |
           set -euo pipefail
           fail() { echo "::error title=Bad input::$1"; exit 2; }
+          OUT="$RUNNER_TEMP/simulate-out"                   # outside the checkout
+          echo "OUT=$OUT" >> "$GITHUB_ENV"
 
           re_seeds='^[0-9]{1,4}(-[0-9]{1,4})?$'
           re_match='^[][A-Za-z0-9_.*?+=][][A-Za-z0-9_.*?+=-]{0,119}$'
@@ -117,8 +119,6 @@ jobs:
               || fail "match may use only letters, digits and _ . * ? + = [ ] - (not first), at most 120 characters"
           fi
 
-          OUT="$RUNNER_TEMP/simulate-out"                   # outside the checkout
-          echo "OUT=$OUT" >> "$GITHUB_ENV"
           args=(); slug=""
           case "$RUN_CHOICE" in
             "matrix.py --experiments 1")    args=(scripts/matrix.py --experiments 1);  slug=matrix-1 ;;
@@ -159,11 +159,11 @@ jobs:
           echo "slug=$slug" >> "$GITHUB_OUTPUT"
           echo "Request accepted: ${args[*]}"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -193,7 +193,7 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -d '' -t args < "$RUNNER_TEMP/argv"
-          workers=$(nproc)
+          workers=$(env -u OMP_NUM_THREADS nproc)          # nproc alone obeys OMP_NUM_THREADS=1
           [ -z "$(git status --porcelain)" ] || { echo "::error::checkout is not clean"; git status --short; exit 3; }
           {
             echo "machine: GitHub-hosted runner, $RUNNER_OS $(uname -m), ${workers} cores, $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | sed 's/^ *//')"
@@ -220,7 +220,11 @@ jobs:
           SLUG: ${{ steps.req.outputs.slug }}
         run: |
           {
-            echo "### simulate: ${SLUG:-request refused}, seeds $SEEDS${MATCH:+, --match $MATCH}"
+            if [ -z "$SLUG" ]; then
+              echo "### simulate: request refused (the step Check the request says why)"
+            else
+              echo "### simulate: $SLUG, seeds $SEEDS${MATCH:+, --match $MATCH}"
+            fi
             echo
             if [ -f "$OUT/run_info.txt" ]; then echo '```'; cat "$OUT/run_info.txt"; echo '```'; fi
             if [ -f "$OUT/rows.csv" ]; then
@@ -248,9 +252,9 @@ jobs:
             fi
             echo
             echo "To add them: download the artifact (gh run download $GITHUB_RUN_ID), append rows.csv without its header to results/ledger.csv, run python3 scripts/report.py --write, commit both (docs/HANDOFF.md, Where heavy runs go). Rows from this machine differ from cluster and laptop rows in the last digits."
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: rows-${{ steps.req.outputs.slug }}-run${{ github.run_number }}

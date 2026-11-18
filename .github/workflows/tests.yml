@@ -2,10 +2,13 @@
 # (Actions tab -> tests -> Run workflow).
 #
 # Two Python versions: 3.9 (what the WashU cluster has) and 3.13 (what the code was written on).
+# GitHub has no Python 3.9 for Ubuntu 26.04 (ubuntu-latest from November 2026), so 3.9 runs on
+# ubuntu-24.04; when GitHub retires that image, move 3.9 to a container or drop it.
 # torch comes from PyTorch's CPU-only index, so no CUDA libraries are downloaded.
 # The run ends with the results headline that conftest.py prints (scripts/report.py; it reads
 # results/ledger.csv and runs no simulation); the same headline goes to the job summary.
-# The suite takes 2 minutes on a recent laptop and about 21 on an old cluster node.
+# The suite takes 2 minutes on a recent laptop, about 21 on an old cluster node and about 29 here
+# (one process; first run 2026-11-18), hence the 60-minute limit.
 
 name: tests
 
@@ -24,18 +27,22 @@ concurrency:
 jobs:
   pytest:
     name: pytest (Python ${{ matrix.python }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.9", "3.13"]
+        include:
+          - python: "3.9"
+            os: ubuntu-24.04
+          - python: "3.13"
+            os: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -74,4 +81,4 @@ jobs:
             else
               echo "No test log (the run did not start)."
             fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"

@@ -24,6 +24,10 @@ python3 scripts/report.py --write     # the same, and regenerates docs/RESULTS.m
 python3 scripts/matrix.py --list      # the scenarios a simulation run can add rows for; runs nothing
 ```
 
+GitHub Actions runs the tests on every push and pull request, and runs result rows on
+GitHub's machines when started by hand (workflow `simulate`; rows differ from cluster and laptop
+rows in the last digits): [docs/HANDOFF.md, Where heavy runs go](docs/HANDOFF.md#where-heavy-runs-go).
+
 - **Adding a result.** `scripts/matrix.py` runs scenarios and appends one row
   per scenario and set of seeds to `results/ledger.csv` (a seed is one repeat
   of a run with different random noise). Then run `report.py --write` and
