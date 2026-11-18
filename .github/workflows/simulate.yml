@@ -17,7 +17,8 @@
 #
 # TIME. GitHub stops any job at 6 hours; this one stops the run at 5 h 30 min, then still uploads
 # the log. A 40-seed closed-loop run of one experiment took 13 to 50 minutes on 8 slow cluster
-# cores; a standard runner has 4. Split a big request so each part fits:
+# cores; GitHub's standard runner has 4 (two seeds of experiment 6's
+# two three-mode scenarios took 80 s there on 2026-11-18). Split a big request so each part fits:
 #   - by experiment: one run per id (1, 2, 3, 4, 5, 6, ...), never the whole baseline at once;
 #   - by --match: e.g. 'e4A*', 'e4B*', ... or '*acq120*' and '*fine20*' as separate runs;
 #   - by seeds: 0-19 and 20-39 run separately give two rows, not one 40-seed row, so split by
@@ -27,9 +28,6 @@
 name: simulate
 
 on:
-  # TEMPORARY trial trigger, to be removed: a push to ci-setup runs one small request
-  push:
-    branches: [ci-setup]
   workflow_dispatch:
     inputs:
       run:
@@ -87,9 +85,9 @@ jobs:
     timeout-minutes: 350
     env:
       # dispatch inputs reach the shell only through these variables, and are checked before use
-      RUN_CHOICE: ${{ github.event_name == 'push' && 'matrix.py --experiments 6' || inputs.run }}   # TEMPORARY
-      SEEDS: ${{ github.event_name == 'push' && '0-1' || inputs.seeds }}   # TEMPORARY
-      MATCH: ${{ github.event_name == 'push' && '*3mode*' || inputs.match }}   # TEMPORARY
+      RUN_CHOICE: ${{ inputs.run }}
+      SEEDS: ${{ inputs.seeds }}
+      MATCH: ${{ inputs.match }}
       PLANT_HOLD: ${{ inputs.plant_hold }}
       PLANT_SUBSTEPS: ${{ inputs.plant_substeps }}
       # as scripts/cluster/remote_run.sh: one thread per worker process, no .pyc files in the checkout
